@@ -1,0 +1,77 @@
+
+    // =========================================================================
+    //  3. REBAR AGENTS & PHYSICS 
+    // =========================================================================
+    class RebarBase {
+        constructor(center, dims) { this.center = center; this.dims = dims; this.segments = []; this.state = "ASSEMBLING"; this.debugPoints = []; }
+        makeSeg(p1, p2, normal, initialState) {
+            let nodes = []; CONFIG.PHYSICS.NODE_POS.forEach(ratio => { nodes.push({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio, vx: 0, vy: 0 }); });
+            let dx = p2.x - p1.x; let dy = p2.y - p1.y; let initialLen = MathUtils.hypot(dx, dy);
+            return { p1: {...p1}, p2: {...p2}, nodes: nodes, normal: normal, initialLen: initialLen, uDir: { x: dx/initialLen, y: dy/initialLen }, state: initialState }; 
+        }
+        generate() { return []; }
+    }
+
+    class Shape21 extends RebarBase {
+        generate() {
+            const {A,B,C} = this.dims; const {x,y} = this.center;
+            let bl = { x: x - B/2, y: y }; let br = { x: x + B/2, y: y }; let tl = { x: bl.x, y: bl.y + A }; let tr = { x: br.x, y: br.y + C }; 
+            this.segments = [ this.makeSeg(tl, bl, {x:-1, y:0}, "FITTING"), this.makeSeg(bl, br, {x:0, y:-1}, "WAITING"), this.makeSeg(br, tr, {x:1, y:0}, "WAITING") ];
+            return this;
+        }
+    }
+
+    class Shape44 extends RebarBase {
+        generate() {
+            const {A,B,C,D,E} = this.dims; const {x,y} = this.center;
+            let pC_left = { x: x - C/2, y: y }; let pC_right = { x: x + C/2, y: y }; let pB_bot = pC_left; let pB_top = { x: pC_left.x, y: pC_left.y + B }; let pD_bot = pC_right; let pD_top = { x: pC_right.x, y: pC_right.y + D }; let pA_right = pB_top; let pA_left = { x: pB_top.x - A, y: pB_top.y }; let pE_left = pD_top; let pE_right = { x: pD_top.x + E, y: pD_top.y };
+            this.segments = [ this.makeSeg(pA_left, pA_right, {x:0, y:1}, "FITTING"), this.makeSeg(pB_top, pB_bot, {x:-1, y:0}, "WAITING"), this.makeSeg(pC_left, pC_right, {x:0, y:-1}, "WAITING"), this.makeSeg(pD_bot, pD_top, {x:1, y:0}, "WAITING"), this.makeSeg(pE_left, pE_right, {x:0, y:1}, "WAITING") ];
+            return this;
+        }
+    }
+
+    class RebarFactory { static create(code, center, dims) { if(code === 21) return new Shape21(center, dims).generate(); if(code === 44) return new Shape44(center, dims).generate(); return null; } }
+
+    const Physics = {
+        getGravityTarget: (px, py, segNormal, walls) => {
+            let minDist = Infinity; let target = null; const OPPOSITE_THRESHOLD = -0.9; 
+            walls.forEach(w => {
+                let dot = w.nx * segNormal.x + w.ny * segNormal.y; if (dot > OPPOSITE_THRESHOLD) return;
+                let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER }; let shiftedP2 = { x: w.x2 + w.nx * CONFIG.COVER, y: w.y2 + w.ny * CONFIG.COVER };
+                let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
+                if (hit && hit.dist < minDist) { minDist = hit.dist; target = { x: hit.x, y: hit.y }; }
+            }); return target;
+        },
+        updatePhysics: (rebar, walls) => {
+            if (rebar.state === "FORMED") return;
+            const { GRAVITY_K, DAMPING, CONVERGE } = CONFIG.PHYSICS; rebar.debugPoints = []; let allSegmentsSettled = true;
+            rebar.segments.forEach((seg, idx) => {
+                if (seg.state === "WAITING") { allSegmentsSettled = false; if (idx > 0 && rebar.segments[idx-1].state === "SETTLED") seg.state = "FITTING"; }
+                if (seg.state === "FITTING") {
+                    allSegmentsSettled = false; let segEnergy = 0; let maxPosError = 0; let validTargets = 0;
+                    seg.nodes.forEach(node => {
+                        let target = Physics.getGravityTarget(node.x, node.y, seg.normal, walls);
+                        if (target) {
+                            validTargets++; rebar.debugPoints.push(target); let dx = target.x - node.x; let dy = target.y - node.y;
+                            let err = Math.sqrt(dx*dx + dy*dy); if (err > maxPosError) maxPosError = err; node.vx += dx * GRAVITY_K; node.vy += dy * GRAVITY_K;
+                        }
+                        node.vx *= DAMPING; node.vy *= DAMPING; node.x += node.vx; node.y += node.vy; segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
+                    });
+                    if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { seg.state = "SETTLED"; Physics.restoreSegmentLine(seg); }
+                }
+            });
+            if (allSegmentsSettled && rebar.state !== "FORMED") { Physics.finalizeMergedShape(rebar); rebar.state = "FORMED"; }
+        },
+        restoreSegmentLine: (seg) => {
+            let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
+            let dx = n2.x - n1.x; let dy = n2.y - n1.y; let dist = MathUtils.hypot(dx, dy); let ux, uy;
+            if (dist > 0.01) { ux = dx / dist; uy = dy / dist; if (ux * seg.uDir.x + uy * seg.uDir.y < 0) { ux = -ux; uy = -uy; } } else { ux = seg.uDir.x; uy = seg.uDir.y; }
+            let halfLen = seg.initialLen / 2; seg.p1 = { x: cx - ux * halfLen, y: cy - uy * halfLen }; seg.p2 = { x: cx + ux * halfLen, y: cy + uy * halfLen };
+        },
+        finalizeMergedShape: (rebar) => {
+            for (let i = 0; i < rebar.segments.length - 1; i++) {
+                let seg1 = rebar.segments[i]; let seg2 = rebar.segments[i+1];
+                let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2); if (corner) { seg1.p2 = corner; seg2.p1 = corner; }
+            }
+        }
+    };
