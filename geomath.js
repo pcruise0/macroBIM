@@ -11,6 +11,27 @@
 
 */
 
+    const MathUtils = {
+        hypot: (dx, dy) => Math.sqrt(dx*dx + dy*dy),
+        rayLineIntersect: (rayOrigin, rayDir, lineP1, lineP2) => {
+            let v1 = rayOrigin; let v2 = { x: rayOrigin.x + rayDir.x * 2000, y: rayOrigin.y + rayDir.y * 2000 };
+            let v3 = lineP1; let v4 = lineP2;
+            let det = (v2.x - v1.x) * (v4.y - v3.y) - (v2.y - v1.y) * (v4.x - v3.x);
+            if (det === 0) return null;
+            let lambda = ((v4.y - v3.y) * (v4.x - v1.x) + (v3.x - v4.x) * (v4.y - v1.y)) / det;
+            let gamma = ((v1.y - v3.y) * (v2.x - v1.x) - (v1.x - v3.x) * (v2.y - v1.y)) / det;
+            if (gamma >= -0.1 && gamma <= 1.1) return { x: v1.x + lambda * (v2.x - v1.x), y: v1.y + lambda * (v2.y - v1.y), dist: Math.abs(lambda) };
+            return null;
+        },
+        getLineIntersection: (p1, p2, p3, p4) => {
+            const det = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+            if (Math.abs(det) < 0.001) return null; 
+            const t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / det;
+            return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+        }
+    };
+
+
 
 // 두 점 사이의 거리 계산 (2D/3D 대응)
 function geo_length(p1, p2) {
