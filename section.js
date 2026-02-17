@@ -127,7 +127,7 @@
             }
         }
     
-// 2. 단면을 생성하는 메인 로직
+        // 2. 단면을 생성하는 메인 로직
         generate(inputString) {
             if (inputString) {
                 this.parsePscBox(inputString);
@@ -156,10 +156,11 @@
                 
                 let leftHaunches = [];
                 let accLeftDist = 0; 
-                for (let i = 1; i < (csLeft.length / 2) - 1; i++) {
-                    accLeftDist += csLeft[i * 2]; 
-                    let hx = webPos[0] - accLeftDist; 
-                    let hy = -Math.abs(hx) * (SLL / 100) - csLeft[i * 2 + 1]; 
+                // [수정됨] 루프 범위 오류 수정: i < 쌍의 갯수
+                for (let i = 1; i < csLeft.length / 2; i++) {
+                    accLeftDist += csLeft[i * 2]; // 1250 누적
+                    let hx = webPos[0] - accLeftDist; // 웹 기준에서 왼쪽(-)으로 이동
+                    let hy = -Math.abs(hx) * (SLL / 100) - csLeft[i * 2 + 1]; // 경사 반영 후 두께(225) 빼기
                     leftHaunches.push({x: hx, y: hy});
                 }
                 
@@ -170,7 +171,8 @@
                 
                 let rightHaunches = [];
                 let accRightDist = 0; 
-                for (let i = 1; i < (csRight.length / 2) - 1; i++) {
+                // [수정됨] 루프 범위 오류 수정
+                for (let i = 1; i < csRight.length / 2; i++) {
                     accRightDist += csRight[i * 2]; 
                     let hx = webPos[webPos.length - 1] + accRightDist; 
                     let hy = -Math.abs(hx) * (SLR / 100) - csRight[i * 2 + 1];
