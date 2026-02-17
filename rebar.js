@@ -13,6 +13,19 @@ class RebarBase {
             this.debugPoints = []; 
         }
 
+        // 기본 교정 로직: 모든 철근에 공통인 "코너 닫기"만 수행
+        finalize() {
+            for (let i = 0; i < this.segments.length - 1; i++) {
+                let seg1 = this.segments[i];
+                let seg2 = this.segments[i+1];
+                let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2);
+                if (corner) {
+                    seg1.p2 = corner;
+                    seg2.p1 = corner;
+                }
+            }
+        }    
+    
         // 기존 makeSeg는 유지하되, 모든 생성이 끝난 후 회전을 적용합니다.
         applyRotation() {
             if (this.rotation === 0) return;
@@ -85,6 +98,30 @@ class RebarBase {
             this.applyRotation();
             return this;
         }
+
+        finalize() {
+            // 1. 우선 부모의 기능을 실행해서 코너(B-C, C-D)들을 먼저 닫습니다.
+            super.finalize();
+    
+            // 2. 이제 Shape44만의 정체성을 지킵니다. (A, E 구간 복원)
+            let n = this.segments.length;
+            
+            // A 구간 (첫 번째 세그먼트)
+            let first = this.segments[0];
+            first.p1 = { 
+                x: first.p2.x - first.uDir.x * first.initialLen, 
+                y: first.p2.y - first.uDir.y * first.initialLen 
+            };
+    
+            // E 구간 (마지막 세그먼트)
+            let last = this.segments[n - 1];
+            last.p2 = { 
+                x: last.p1.x + last.uDir.x * last.initialLen, 
+                y: last.p1.y + last.uDir.y * last.initialLen 
+            };
+            
+            console.log(`[Shape44] ID: ${this.id} 형상 교정 완료!`);
+        }        
     }
 
     class RebarFactory { 
