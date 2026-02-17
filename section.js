@@ -195,10 +195,77 @@
             // 렌더링용 기준점 이동
             outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
     
-            // 임시로 innerNodes는 빈 배열(통뼈 단면)로 그립니다.
-            let innerNodes = []; 
+                // =========================================================
+                // 2. 내부 셀 (innerNodes) 계산 (다중 셀 완벽 지원)
+                // =========================================================
+                const tsCells = data.TS || {}; 
+                const bsCells = data.BS || {}; 
+                
+                // 방(Cell) 개수만큼 반복하며 innerNodes[0], innerNodes[1] ... 생성
+                for (let cellId in tsCells) {
+                    let cellIndex = parseInt(cellId) - 1; 
+
+                    let tsL = tsCells[cellId][0]; 
+                    let tsR = tsCells[cellId][1]; 
+                    // 하부 데이터가 없으면 에러 방지용 기본값
+                    let bsL = bsCells[cellId] ? bsCells[cellId][0] : [0, 0, 0, 0];
+                    let bsR = bsCells[cellId] ? bsCells[cellId][1] : [0, 0, 0, 0];
+
+                    // ① 좌/우 복부 내측 선 생성 (박사님의 geo_offset 활용)
+                    let in_L_web = geo_offset(plwt, plb, webThick[0]);
+                    let inL_p1 = {x: in_L_web.x1, y: in_L_web.y1};
+                    let inL_p2 = {x: in_L_web.x2, y: in_L_web.y2};
+
+                    // geo_offset 특성상 우측 웹도 양수(+)를 넣으면 완벽하게 안쪽(좌측)으로 밀어냅니다!
+                    let in_R_web = geo_offset(prwt, prb, webThick[1]);
+                    let inR_p1 = {x: in_R_web.x1, y: in_R_web.y1};
+                    let inR_p2 = {x: in_R_web.x2, y: in_R_web.y2};
+
+                    // ② 상부 슬래브 (TS) 교점 및 헌치 계산
+                    // 좌측 TS (교점 및 끝단)
+                    let tsL_line_p1 = { x: 0, y: -tsL[1] };
+                    let tsL_line_p2 = { x: -10000, y: -10000 * (SLL / 100) - tsL[1] };
+                    let p_tsL_root = geo_intersect(inL_p1, inL_p2, tsL_line_p1, tsL_line_p2);
+                    let tipL_x = p_tsL_root.x + tsL[2]; 
+                    let p_tsL_tip = { x: tipL_x, y: -Math.abs(tipL_x) * (SLL / 100) - tsL[3] };
+
+                    // 우측 TS (교점 및 끝단)
+                    let tsR_line_p1 = { x: 0, y: -tsR[1] };
+                    let tsR_line_p2 = { x: 10000, y: -10000 * (SLR / 100) - tsR[1] };
+                    let p_tsR_root = geo_intersect(inR_p1, inR_p2, tsR_line_p1, tsR_line_p2);
+                    let tipR_x = p_tsR_root.x - tsR[2];
+                    let p_tsR_tip = { x: tipR_x, y: -Math.abs(tipR_x) * (SLR / 100) - tsR[3] };
+
+                    // ③ 하부 슬래브 (BS) 교점 및 헌치 계산
+                    // 좌측 BS (교점 및 끝단) - 하부는 수평선
+                    let bsL_line_p1 = { x: 0, y: -HT + bsL[1] };
+                    let bsL_line_p2 = { x: -10000, y: -HT + bsL[1] };
+                    let p_bsL_root = geo_intersect(inL_p1, inL_p2, bsL_line_p1, bsL_line_p2);
+                    let p_bsL_tip = { x: p_bsL_root.x + bsL[2], y: -HT + bsL[3] };
+
+                    // 우측 BS (교점 및 끝단)
+                    let bsR_line_p1 = { x: 0, y: -HT + bsR[1] };
+                    let bsR_line_p2 = { x: 10000, y: -HT + bsR[1] };
+                    let p_bsR_root = geo_intersect(inR_p1, inR_p2, bsR_line_p1, bsR_line_p2);
+                    let p_bsR_tip = { x: p_bsR_root.x - bsR[2], y: -HT + bsR[3] };
+
+                    // ④ 시계방향으로 1개 방(Cell)을 폐합하여 배열에 꽂아 넣기
+                    // 순서: 좌상Root -> 좌상Tip -> 우상Tip -> 우상Root -> 우하Root -> 우하Tip -> 좌하Tip -> 좌하Root
+                    innerNodes[cellIndex] = [
+                        p_tsL_root, p_tsL_tip, p_tsR_tip, p_tsR_root,
+                        p_bsR_root, p_bsR_tip, p_bsL_tip, p_bsL_root
+                    ];
+                }
+            }
+
+            // =========================================================
+            // 3. 렌더링을 위한 좌표 변환 및 Path 조립
+            // =========================================================
+            outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
+            innerNodes.forEach(cell => { cell.forEach(p => { p.x += this.cx; p.y += this.cy; }); });
+
             let pathsToBuild = [];
             pathsToBuild.push({ nodes: outerNodes, specs: outerNodes.map(()=>({type:'N'})) });
-            this.buildFromPaths(pathsToBuild);
+            innerNodes.forEach(cell => { pathsToBuild.push({ nodes: cell, specs: cell.map(()=>({type:'N'})) }); });
         }
     }
