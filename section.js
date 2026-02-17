@@ -146,6 +146,79 @@
                 console.log(`[Generate 데이터 준비] 형고: ${HT}, 좌측 캔틸레버: ${csLeft}, 상부 웹 두께: ${webThick[0]}`);
                 
                 // ⭐ 이 곳에 추출된 변수를 사용한 새로운 좌표 계산 로직이 들어갈 예정입니다 ⭐
+                // ---------------------------------------------------------
+                // 1. 주요 절점 좌표 및 헌치 계산
+                // ---------------------------------------------------------
+                
+                // 박스 상부 중앙
+                let ptc = {x: 0, y: 0};
+                
+                // 좌측 캔틸레버 끝단 (x는 왼쪽이므로 음수, y는 상부 경사(SLL) 반영)
+                let plc = {x: -WTL, y: -WTL * (SLL / 100)};
+                
+                // 좌측 캔틸레버 끝단 하부
+                let plcb = {x: plc.x, y: plc.y - csLeft[csLeft.length - 1]};
+                
+                // 좌측 복부 외측 상단 (webPos[0]는 음수이므로 Math.abs 적용)
+                let plwt = {x: webPos[0], y: -Math.abs(webPos[0]) * (SLL / 100) - csLeft[1]};
+                
+                // ⭐ 좌측 캔틸레버 다중 헌치 계산 (웹 -> 캔틸레버 끝단 방향으로 누적)
+                let leftHaunches = [];
+                let accLeftDist = 0; // 수평 거리 누적 변수
+                // 첫 데이터(뿌리)와 마지막 데이터(끝단)를 제외한 중간 헌치들만 루프!
+                for (let i = 1; i < (csLeft.length / 2) - 1; i++) {
+                    accLeftDist += csLeft[i * 2]; // d값 누적
+                    let hx = webPos[0] - accLeftDist; // 웹 기준에서 왼쪽(-)으로 이동
+                    let hy = -Math.abs(hx) * (SLL / 100) - csLeft[i * 2 + 1]; // 경사 y값에서 h값 빼기
+                    leftHaunches.push({x: hx, y: hy});
+                }
+                
+                // 중앙부 하부슬래브 단부
+                let pcb = {x: 0, y: -HT};
+                
+                // 좌측 하부슬래브 단부
+                let plb = {x: -WBL, y: pcb.y};
+                
+                // 우측 하부슬래브 단부 (우측이므로 양수 WBR)
+                let prb = {x: WBR, y: pcb.y};
+                
+                // 우측 복부 외측 상단
+                let prwt = {x: webPos[webPos.length - 1], y: -Math.abs(webPos[webPos.length - 1]) * (SLR / 100) - csRight[1]};
+                
+                // ⭐ 우측 캔틸레버 다중 헌치 계산 (웹 -> 캔틸레버 끝단 방향으로 누적)
+                let rightHaunches = [];
+                let accRightDist = 0; // 수평 거리 누적 변수
+                for (let i = 1; i < (csRight.length / 2) - 1; i++) {
+                    accRightDist += csRight[i * 2]; // d값 누적
+                    let hx = webPos[webPos.length - 1] + accRightDist; // 웹 기준에서 오른쪽(+)으로 이동
+                    let hy = -Math.abs(hx) * (SLR / 100) - csRight[i * 2 + 1];
+                    rightHaunches.push({x: hx, y: hy});
+                }
+                
+                // 우측 캔틸레버 끝단 (우측폭 WTR 사용)
+                let prc = {x: WTR, y: -WTR * (SLR / 100)};
+                
+                // 우측 캔틸레버 끝단 하부
+                let prcb = {x: prc.x, y: prc.y - csRight[csRight.length - 1]};                
+                
+                // ---------------------------------------------------------
+                // 2. 반시계 방향(Counter-Clockwise) 외곽선 조립 (Assembly)
+                // ---------------------------------------------------------
+                // 조립 순서: 상부중앙 -> 좌측상단 -> 좌측하단 -> [좌측헌치 역순] -> 좌측웹 -> 좌측하단 -> 중앙하단 -> 우측하단 -> 우측웹 -> [우측헌치 정순] -> 우측하단 -> 우측상단
+                let outerNodes = [
+                    ptc,               // 1. 박스 상부 중앙
+                    plc,               // 2. 좌측 캔틸레버 끝단
+                    plcb,              // 3. 좌측 캔틸레버 끝단 하부
+                    ...leftHaunches.reverse(), // ⭐ 4. 좌측 헌치 (끝단에서 웹으로 들어오므로 배열 순서를 뒤집음!)
+                    plwt,              // 5. 좌측 복부 상단
+                    plb,               // 6. 좌측 하부슬래브 단부
+                    pcb,               // 7. 중앙 하부 단부
+                    prb,               // 8. 우측 하부슬래브 단부
+                    prwt,              // 9. 우측 복부 상단
+                    ...rightHaunches,  // ⭐ 10. 우측 헌치 (웹에서 끝단으로 나가므로 배열 그대로 사용)
+                    prcb,              // 11. 우측 캔틸레버 끝단 하부
+                    prc                // 12. 우측 캔틸레버 끝단
+                ];                
             }
     
             // (3) 임시 Fallback 렌더링 (화면이 깨지지 않도록 기존 CONFIG 기반의 그리기 로직 유지)
@@ -153,13 +226,15 @@
             const paramsToUse = this.params || CONFIG.BOXGIRDER;
             const { H, W_top, W_bot, w_cant, t_top_tip, t_top_root, h_drop, t_top_center, t_bot, t_web, th_x, th_y, bh_x, bh_y } = paramsToUse;
             const half_Wt = W_top / 2; const half_Wb = W_bot / 2; const w_in_half = half_Wt - w_cant - t_web;
-            
+
+            /*
             let outerNodes = [ 
                 { x: half_Wt, y: 0 }, { x: -half_Wt, y: 0 }, { x: -half_Wt, y: -t_top_tip }, 
                 { x: -half_Wt + w_cant, y: -t_top_root }, { x: -half_Wt + w_cant, y: -t_top_root - h_drop }, 
                 { x: -half_Wb, y: -H }, { x: half_Wb, y: -H }, { x: half_Wt - w_cant, y: -t_top_root - h_drop }, 
                 { x: half_Wt - w_cant, y: -t_top_root }, { x: half_Wt, y: -t_top_tip } 
             ];
+            */
             outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
     
             let innerNodes = []; 
