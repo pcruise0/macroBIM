@@ -69,95 +69,112 @@
         }
     }
 
-class BoxGirder extends SectionBase {
-    /* 사용예
-    // 1. 객체 생성
-    let myBox = new BoxGirder(0, 0, null);
-
-    // 2. 박사님의 텍스트 데이터 주입 (파싱 및 저장)
-    let inputString = "{PSCBOX,1,{BOX,2400,5150,5150,2250,2250,0,0},{CS,L,0,400,1250,225},{CS,R,0,400,1250,225},{TS,{1,{0,400,1200,225}}},{BS,{1,{0,250,0,250}}},{WB,500,500}}";
-    myBox.parsePscBox(inputString);
-
-    // 3. 파싱된 데이터를 바탕으로 그리기!
-    myBox.generate();
-    */
+    class BoxGirder extends SectionBase {
+        constructor(cx, cy, params) {
+            super(cx, cy, params);
+            // 파싱된 데이터를 저장할 내부 변수
+            this.parsedData = null; 
+        }
     
-    constructor(cx, cy, params) {
-        super(cx, cy, params);
-        // 파싱된 데이터를 저장할 내부 변수 추가
-        this.parsedData = null; 
-    }
-
-    // 1. 박사님이 고안하신 {} 형태의 입력 데이터를 파싱하는 클래스 메서드
-    parsePscBox(inputString) {
-        try {
-            // {}를 []로 치환하고 영문 키워드에 큰따옴표 씌우기
-            let jsonStr = inputString.replace(/\{/g, '[').replace(/\}/g, ']');
-            jsonStr = jsonStr.replace(/([a-zA-Z]+)/g, '"$1"');
-            
-            const rawArray = JSON.parse(jsonStr);
-            
-            if (rawArray[0] !== "PSCBOX") {
-                throw new Error("PSCBOX 형식이 아닙니다.");
-            }
-            
-            const sectionId = rawArray[1];
-            const data = { id: sectionId };
-            
-            // 데이터 배열을 순회하며 변수명 매핑
-            for (let i = 2; i < rawArray.length; i++) {
-                const item = rawArray[i];
-                const key = item[0]; 
+        // 1. 박사님의 {} 포맷을 JSON 객체로 파싱하는 로직
+        parsePscBox(inputString) {
+            try {
+                // 중괄호를 대괄호로, 영문 키워드를 큰따옴표로 감싸기
+                let jsonStr = inputString.replace(/\{/g, '[').replace(/\}/g, ']');
+                jsonStr = jsonStr.replace(/([a-zA-Z]+)/g, '"$1"');
                 
-                if (key === "BOX") {
-                    data[key] = {
-                        HT: item[1], WTL: item[2], WTR: item[3],
-                        WBL: item[4], SBR: item[5], SLL: item[6], SLR: item[7]
-                    };
-                } else if (key === "WP" || key === "WB") {
-                    data[key] = item.slice(1);
-                } else if (key === "CS") {
-                    if (!data[key]) data[key] = {};
-                    const side = item[1]; // "L" 또는 "R"
-                    data[key][side] = item.slice(2);
-                } else if (key === "TS" || key === "BS") {
-                    if (!data[key]) data[key] = {};
-                    for (let j = 1; j < item.length; j++) {
-                        const cellData = item[j];
-                        const cellId = cellData[0];
-                        data[key][cellId] = cellData.slice(1);
+                const rawArray = JSON.parse(jsonStr);
+                
+                if (rawArray[0] !== "PSCBOX") {
+                    throw new Error("PSCBOX 형식이 아닙니다.");
+                }
+                
+                const sectionId = rawArray[1];
+                const data = { id: sectionId };
+                
+                for (let i = 2; i < rawArray.length; i++) {
+                    const item = rawArray[i];
+                    const key = item[0]; 
+                    
+                    if (key === "BOX") {
+                        data[key] = {
+                            HT: item[1], WTL: item[2], WTR: item[3],
+                            WBL: item[4], SBR: item[5], SLL: item[6], SLR: item[7]
+                        };
+                    } else if (key === "WP" || key === "WB") {
+                        data[key] = item.slice(1);
+                    } else if (key === "CS") {
+                        if (!data[key]) data[key] = {};
+                        const side = item[1]; // "L" 또는 "R"
+                        data[key][side] = item.slice(2);
+                    } else if (key === "TS" || key === "BS") {
+                        if (!data[key]) data[key] = {};
+                        for (let j = 1; j < item.length; j++) {
+                            const cellData = item[j];
+                            const cellId = cellData[0];
+                            data[key][cellId] = cellData.slice(1);
+                        }
                     }
                 }
+                
+                this.parsedData = data;
+                console.log(`✅ [BoxGirder] ID: ${sectionId} 데이터 파싱 완료!`, this.parsedData);
+                return this.parsedData;
+                
+            } catch (error) {
+                console.error("[BoxGirder] 데이터 파싱 중 오류 발생:", error);
+                return null;
             }
+        }
+    
+        // 2. 단면을 생성하는 메인 로직
+        generate(inputString) {
+            // (1) 입력된 문자열이 있다면 파싱 먼저 실행
+            if (inputString) {
+                this.parsePscBox(inputString);
+            }
+    
+            // (2) 파싱된 데이터가 있을 경우 변수 추출 (디버깅용)
+            if (this.parsedData) {
+                const data = this.parsedData;
+                const { HT, WTL, WTR, WBL, SBR, SLL, SLR } = data.BOX;
+                const csLeft = data.CS ? data.CS.L : [];   
+                const csRight = data.CS ? data.CS.R : [];  
+                const webThick = data.WB || [];
+                const webPos = data.WP || [];   
+                
+                console.log(`[Generate 데이터 준비] 형고: ${HT}, 좌측 캔틸레버: ${csLeft}, 상부 웹 두께: ${webThick[0]}`);
+                
+                // ⭐ 이 곳에 추출된 변수를 사용한 새로운 좌표 계산 로직이 들어갈 예정입니다 ⭐
+            }
+    
+            // (3) 임시 Fallback 렌더링 (화면이 깨지지 않도록 기존 CONFIG 기반의 그리기 로직 유지)
+            // 박사님께서 새로운 배열 인덱스들의 기하학적 의미를 알려주시면 이 부분을 완전히 교체하겠습니다!
+            const paramsToUse = this.params || CONFIG.BOXGIRDER;
+            const { H, W_top, W_bot, w_cant, t_top_tip, t_top_root, h_drop, t_top_center, t_bot, t_web, th_x, th_y, bh_x, bh_y } = paramsToUse;
+            const half_Wt = W_top / 2; const half_Wb = W_bot / 2; const w_in_half = half_Wt - w_cant - t_web;
             
-            // 파싱된 데이터를 클래스 내부에 저장
-            this.parsedData = data;
-            console.log(`✅ [BoxGirder] ID: ${sectionId} 데이터 파싱 완료!`, this.parsedData);
-            return this.parsedData;
-            
-        } catch (error) {
-            console.error("[BoxGirder] 데이터 파싱 중 오류 발생:", error);
-            return null;
+            let outerNodes = [ 
+                { x: half_Wt, y: 0 }, { x: -half_Wt, y: 0 }, { x: -half_Wt, y: -t_top_tip }, 
+                { x: -half_Wt + w_cant, y: -t_top_root }, { x: -half_Wt + w_cant, y: -t_top_root - h_drop }, 
+                { x: -half_Wb, y: -H }, { x: half_Wb, y: -H }, { x: half_Wt - w_cant, y: -t_top_root - h_drop }, 
+                { x: half_Wt - w_cant, y: -t_top_root }, { x: half_Wt, y: -t_top_tip } 
+            ];
+            outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
+    
+            let innerNodes = []; 
+            innerNodes[0] = [ 
+                { x: -w_in_half + th_x, y: -t_top_center }, { x: w_in_half - th_x, y: -t_top_center }, 
+                { x: w_in_half, y: -t_top_center - th_y }, { x: w_in_half, y: -H + t_bot + bh_y }, 
+                { x: w_in_half - bh_x, y: -H + t_bot }, { x: -w_in_half + bh_x, y: -H + t_bot }, 
+                { x: -w_in_half, y: -H + t_bot + bh_y }, { x: -w_in_half, y: -t_top_center - th_y } 
+            ];
+            innerNodes.forEach(cell => { cell.forEach(p => { p.x += this.cx; p.y += this.cy; }); });
+    
+            let pathsToBuild = [];
+            pathsToBuild.push({ nodes: outerNodes, specs: outerNodes.map(()=>({type:'N'})) });
+            innerNodes.forEach(cell => { pathsToBuild.push({ nodes: cell, specs: cell.map(()=>({type:'N'})) }); });
+    
+            this.buildFromPaths(pathsToBuild);
         }
     }
-
-    // 2. 단면을 그리는 제너레이터 (현재는 기존 CONFIG를 쓰지만, 곧 parsedData로 교체될 예정입니다)
-    generate() {
-        // TODO: 다음 단계에서 CONFIG.BOXGIRDER 대신 this.parsedData의 값을 사용하여 점을 찍도록 수정!
-        const { H, W_top, W_bot, w_cant, t_top_tip, t_top_root, h_drop, t_top_center, t_bot, t_web, th_x, th_y, bh_x, bh_y } = CONFIG.BOXGIRDER;
-        const half_Wt = W_top / 2; const half_Wb = W_bot / 2; const w_in_half = half_Wt - w_cant - t_web;
-        
-        let outerNodes = [ { x: half_Wt, y: 0 }, { x: -half_Wt, y: 0 }, { x: -half_Wt, y: -t_top_tip }, { x: -half_Wt + w_cant, y: -t_top_root }, { x: -half_Wt + w_cant, y: -t_top_root - h_drop }, { x: -half_Wb, y: -H }, { x: half_Wb, y: -H }, { x: half_Wt - w_cant, y: -t_top_root - h_drop }, { x: half_Wt - w_cant, y: -t_top_root }, { x: half_Wt, y: -t_top_tip } ];
-        outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
-
-        let innerNodes = []; 
-        innerNodes[0] = [ { x: -w_in_half + th_x, y: -t_top_center }, { x: w_in_half - th_x, y: -t_top_center }, { x: w_in_half, y: -t_top_center - th_y }, { x: w_in_half, y: -H + t_bot + bh_y }, { x: w_in_half - bh_x, y: -H + t_bot }, { x: -w_in_half + bh_x, y: -H + t_bot }, { x: -w_in_half, y: -H + t_bot + bh_y }, { x: -w_in_half, y: -t_top_center - th_y } ];
-        innerNodes.forEach(cell => { cell.forEach(p => { p.x += this.cx; p.y += this.cy; }); });
-
-        let pathsToBuild = [];
-        pathsToBuild.push({ nodes: outerNodes, specs: outerNodes.map(()=>({type:'N'})) });
-        innerNodes.forEach(cell => { pathsToBuild.push({ nodes: cell, specs: cell.map(()=>({type:'N'})) }); });
-
-        this.buildFromPaths(pathsToBuild);
-    }
-}
