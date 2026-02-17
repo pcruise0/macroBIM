@@ -2,21 +2,61 @@
     // =========================================================================
     //  3. REBAR AGENTS & PHYSICS 
     // =========================================================================
-    class RebarBase {
-        constructor(center, dims) { this.center = center; this.dims = dims; this.segments = []; this.state = "ASSEMBLING"; this.debugPoints = []; }
+class RebarBase {
+        // rotation 인자 추가
+        constructor(center, dims, rotation = 0) { 
+            this.center = center; 
+            this.dims = dims; 
+            this.rotation = rotation; // 회전각 저장
+            this.segments = []; 
+            this.state = "ASSEMBLING"; 
+            this.debugPoints = []; 
+        }
+
+        // 기존 makeSeg는 유지하되, 모든 생성이 끝난 후 회전을 적용합니다.
+        applyRotation() {
+            if (this.rotation === 0) return;
+            
+            this.segments.forEach(seg => {
+                // 1. 선분의 양 끝점(p1, p2) 회전 (기준점: this.center)
+                seg.p1 = geo_rotatePt2D(seg.p1, this.center, this.rotation);
+                seg.p2 = geo_rotatePt2D(seg.p2, this.center, this.rotation);
+                
+                // 2. 물리 엔진용 노드(nodes)들 회전
+                seg.nodes.forEach(node => {
+                    let rPos = geo_rotatePt2D(node, this.center, this.rotation);
+                    node.x = rPos.x; node.y = rPos.y;
+                });
+                
+                // 3. ⭐매우 중요: 법선 벡터(normal)도 회전! (벡터이므로 기준점 {0,0})
+                let rNorm = geo_rotatePt2D(seg.normal, {x:0, y:0}, this.rotation);
+                seg.normal = rNorm;
+                
+                // 4. 단위 방향 벡터(uDir) 재계산
+                let dx = seg.p2.x - seg.p1.x; let dy = seg.p2.y - seg.p1.y;
+                seg.uDir = { x: dx/seg.initialLen, y: dy/seg.initialLen };
+            });
+        }
+        
         makeSeg(p1, p2, normal, initialState) {
-            let nodes = []; CONFIG.PHYSICS.NODE_POS.forEach(ratio => { nodes.push({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio, vx: 0, vy: 0 }); });
+            let nodes = []; 
+            CONFIG.PHYSICS.NODE_POS.forEach(ratio => { 
+                nodes.push({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio, vx: 0, vy: 0 }); 
+            });
             let dx = p2.x - p1.x; let dy = p2.y - p1.y; let initialLen = MathUtils.hypot(dx, dy);
             return { p1: {...p1}, p2: {...p2}, nodes: nodes, normal: normal, initialLen: initialLen, uDir: { x: dx/initialLen, y: dy/initialLen }, state: initialState }; 
         }
-        generate() { return []; }
     }
 
+    // Shape21, Shape44는 생성 직후 applyRotation()만 호출해주면 끝납니다.
     class Shape21 extends RebarBase {
         generate() {
             const {A,B,C} = this.dims; const {x,y} = this.center;
-            let bl = { x: x - B/2, y: y }; let br = { x: x + B/2, y: y }; let tl = { x: bl.x, y: bl.y + A }; let tr = { x: br.x, y: br.y + C }; 
+            let bl = { x: x - B/2, y: y }; let br = { x: x + B/2, y: y }; 
+            let tl = { x: bl.x, y: bl.y + A }; let tr = { x: br.x, y: br.y + C }; 
             this.segments = [ this.makeSeg(tl, bl, {x:-1, y:0}, "FITTING"), this.makeSeg(bl, br, {x:0, y:-1}, "WAITING"), this.makeSeg(br, tr, {x:1, y:0}, "WAITING") ];
+            
+            this.applyRotation(); // 회전 공정 추가!
             return this;
         }
     }
@@ -24,13 +64,33 @@
     class Shape44 extends RebarBase {
         generate() {
             const {A,B,C,D,E} = this.dims; const {x,y} = this.center;
-            let pC_left = { x: x - C/2, y: y }; let pC_right = { x: x + C/2, y: y }; let pB_bot = pC_left; let pB_top = { x: pC_left.x, y: pC_left.y + B }; let pD_bot = pC_right; let pD_top = { x: pC_right.x, y: pC_right.y + D }; let pA_right = pB_top; let pA_left = { x: pB_top.x - A, y: pB_top.y }; let pE_left = pD_top; let pE_right = { x: pD_top.x + E, y: pD_top.y };
-            this.segments = [ this.makeSeg(pA_left, pA_right, {x:0, y:1}, "FITTING"), this.makeSeg(pB_top, pB_bot, {x:-1, y:0}, "WAITING"), this.makeSeg(pC_left, pC_right, {x:0, y:-1}, "WAITING"), this.makeSeg(pD_bot, pD_top, {x:1, y:0}, "WAITING"), this.makeSeg(pE_left, pE_right, {x:0, y:1}, "WAITING") ];
+            let pC_left = { x: x - C/2, y: y }; let pC_right = { x: x + C/2, y: y }; 
+            let pB_bot = pC_left; let pB_top = { x: pC_left.x, y: pC_left.y + B }; 
+            let pD_bot = pC_right; let pD_top = { x: pC_right.x, y: pC_right.y + D }; 
+            let pA_right = pB_top; let pA_left = { x: pB_top.x - A, y: pB_top.y }; 
+            let pE_left = pD_top; let pE_right = { x: pD_top.x + E, y: pD_top.y };
+            
+            this.segments = [ 
+                this.makeSeg(pA_left, pA_right, {x:0, y:1}, "FITTING"), 
+                this.makeSeg(pB_top, pB_bot, {x:-1, y:0}, "WAITING"), 
+                this.makeSeg(pC_left, pC_right, {x:0, y:-1}, "WAITING"), 
+                this.makeSeg(pD_bot, pD_top, {x:1, y:0}, "WAITING"), 
+                this.makeSeg(pE_left, pE_right, {x:0, y:1}, "WAITING") 
+            ];
+            
+            this.applyRotation(); // 회전 공정 추가!
             return this;
         }
     }
 
-    class RebarFactory { static create(code, center, dims) { if(code === 21) return new Shape21(center, dims).generate(); if(code === 44) return new Shape44(center, dims).generate(); return null; } }
+    class RebarFactory { 
+        static create(code, center, dims, rotation = 0) { 
+            let rebar = null;
+            if(code === 21) rebar = new Shape21(center, dims, rotation).generate(); 
+            if(code === 44) rebar = new Shape44(center, dims, rotation).generate(); 
+            return rebar;
+        } 
+    }
 
     const Physics = {
         getGravityTarget: (px, py, segNormal, walls) => {
