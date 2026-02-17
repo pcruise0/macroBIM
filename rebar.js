@@ -2,7 +2,7 @@
     // =========================================================================
     //  3. REBAR AGENTS & PHYSICS 
     // =========================================================================
-class RebarBase {
+    class RebarBase {
         // rotation 인자 추가
         constructor(center, dims, rotation = 0) { 
             this.center = center; 
@@ -161,7 +161,10 @@ class RebarBase {
                     if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { seg.state = "SETTLED"; Physics.restoreSegmentLine(seg); }
                 }
             });
-            if (allSegmentsSettled && rebar.state !== "FORMED") { Physics.finalizeMergedShape(rebar); rebar.state = "FORMED"; }
+            if (allSegmentsSettled && rebar.state !== "FORMED") { 
+                rebar.finalize(); // ⭐ 철근이 스스로를 교정합니다.
+                rebar.state = "FORMED"; 
+            }
         },
         restoreSegmentLine: (seg) => {
             let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
