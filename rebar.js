@@ -1,10 +1,11 @@
-    // =========================================================================
-    //  3. REBAR AGENTS & PHYSICS (표준 형상 코드 1, 11, 23, 25, 44, 63 포함)
-    // =========================================================================
-    /**
- * Rebar Solver Shape Library
+/**
+ * Rebar Solver Shape Library & Physics Engine (v0.1.7)
  * 지원 코드: 01, 11, 23, 25, 44, 63
  */
+
+// =========================================================================
+//  3. REBAR AGENTS & PHYSICS (표준 형상 코드 1, 11, 23, 25, 44, 63 포함)
+// =========================================================================
 
 class RebarBase {
     constructor(center, dims, rotation = 0) { 
@@ -90,6 +91,20 @@ class Shape11 extends RebarBase {
         ];
         this.applyRotation();
         return this;
+    }
+
+    finalize() {
+        // L형 철근은 각도를 물리 엔진의 안착 방향에 맞춥니다.
+        let angA = Math.atan2(this.segments[0].nodes[1].y - this.segments[0].nodes[0].y, this.segments[0].nodes[1].x - this.segments[0].nodes[0].x);
+        let angB = Math.atan2(this.segments[1].nodes[1].y - this.segments[1].nodes[0].y, this.segments[1].nodes[1].x - this.segments[1].nodes[0].x);
+        
+        super.finalize();
+
+        // 길이 보존
+        let sA = this.segments[0];
+        sA.p1 = { x: sA.p2.x - Math.cos(angA) * sA.initialLen, y: sA.p2.y - Math.sin(angA) * sA.initialLen };
+        let sB = this.segments[1];
+        sB.p2 = { x: sB.p1.x + Math.cos(angB) * sB.initialLen, y: sB.p1.y + Math.sin(angB) * sB.initialLen };
     }
 }
 
@@ -199,49 +214,50 @@ class RebarFactory {
     } 
 }
 
-    const Physics = {
-        getGravityTarget: (px, py, segNormal, walls) => {
-            let minDist = Infinity; let target = null; const OPPOSITE_THRESHOLD = -0.9; 
-            walls.forEach(w => {
-                let dot = w.nx * segNormal.x + w.ny * segNormal.y; if (dot > OPPOSITE_THRESHOLD) return;
-                let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER }; let shiftedP2 = { x: w.x2 + w.nx * CONFIG.COVER, y: w.y2 + w.ny * CONFIG.COVER };
-                let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
-                if (hit && hit.dist < minDist) { minDist = hit.dist; target = { x: hit.x, y: hit.y }; }
-            }); return target;
-        },
-        updatePhysics: (rebar, walls) => {
-            if (rebar.state === "FORMED") return;
-            const { GRAVITY_K, DAMPING, CONVERGE } = CONFIG.PHYSICS; rebar.debugPoints = []; let allSegmentsSettled = true;
-            rebar.segments.forEach((seg, idx) => {
-                if (seg.state === "WAITING") { allSegmentsSettled = false; if (idx > 0 && rebar.segments[idx-1].state === "SETTLED") seg.state = "FITTING"; }
-                if (seg.state === "FITTING") {
-                    allSegmentsSettled = false; let segEnergy = 0; let maxPosError = 0; let validTargets = 0;
-                    seg.nodes.forEach(node => {
-                        let target = Physics.getGravityTarget(node.x, node.y, seg.normal, walls);
-                        if (target) {
-                            validTargets++; rebar.debugPoints.push(target); let dx = target.x - node.x; let dy = target.y - node.y;
-                            let err = Math.sqrt(dx*dx + dy*dy); if (err > maxPosError) maxPosError = err; node.vx += dx * GRAVITY_K; node.vy += dy * GRAVITY_K;
-                        }
-                        node.vx *= DAMPING; node.vy *= DAMPING; node.x += node.vx; node.y += node.vy; segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
-                    });
-                    if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { seg.state = "SETTLED"; Physics.restoreSegmentLine(seg); }
-                }
-            });
-            if (allSegmentsSettled && rebar.state !== "FORMED") { 
-                rebar.finalize(); // ⭐ 철근이 스스로를 교정합니다.
-                rebar.state = "FORMED"; 
+const Physics = {
+    getGravityTarget: (px, py, segNormal, walls) => {
+        let minDist = Infinity; let target = null; const OPPOSITE_THRESHOLD = -0.9; 
+        walls.forEach(w => {
+            let dot = w.nx * segNormal.x + w.ny * segNormal.y; if (dot > OPPOSITE_THRESHOLD) return;
+            let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER }; let shiftedP2 = { x: w.x2 + w.nx * CONFIG.COVER, y: w.y2 + w.ny * CONFIG.COVER };
+            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
+            if (hit && hit.dist < minDist) { minDist = hit.dist; target = { x: hit.x, y: hit.y }; }
+        }); return target;
+    },
+    updatePhysics: (rebar, walls) => {
+        if (rebar.state === "FORMED") return;
+        const { GRAVITY_K, DAMPING, CONVERGE } = CONFIG.PHYSICS; rebar.debugPoints = []; let allSegmentsSettled = true;
+        rebar.segments.forEach((seg, idx) => {
+            if (seg.state === "WAITING") { allSegmentsSettled = false; if (idx > 0 && rebar.segments[idx-1].state === "SETTLED") seg.state = "FITTING"; }
+            if (seg.state === "FITTING") {
+                allSegmentsSettled = false; let segEnergy = 0; let maxPosError = 0; let validTargets = 0;
+                seg.nodes.forEach(node => {
+                    let target = Physics.getGravityTarget(node.x, node.y, seg.normal, walls);
+                    if (target) {
+                        validTargets++; rebar.debugPoints.push(target); let dx = target.x - node.x; let dy = target.y - node.y;
+                        let err = Math.sqrt(dx*dx + dy*dy); if (err > maxPosError) maxPosError = err; node.vx += dx * GRAVITY_K; node.vy += dy * GRAVITY_K;
+                    }
+                    node.vx *= DAMPING; node.vy *= DAMPING; node.x += node.vx; node.y += node.vy; segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
+                });
+                if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { seg.state = "SETTLED"; Physics.restoreSegmentLine(seg); }
             }
-        },
-        restoreSegmentLine: (seg) => {
-            let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
-            let dx = n2.x - n1.x; let dy = n2.y - n1.y; let dist = MathUtils.hypot(dx, dy); let ux, uy;
-            if (dist > 0.01) { ux = dx / dist; uy = dy / dist; if (ux * seg.uDir.x + uy * seg.uDir.y < 0) { ux = -ux; uy = -uy; } } else { ux = seg.uDir.x; uy = seg.uDir.y; }
-            let halfLen = seg.initialLen / 2; seg.p1 = { x: cx - ux * halfLen, y: cy - uy * halfLen }; seg.p2 = { x: cx + ux * halfLen, y: cy + uy * halfLen };
-        },
-        finalizeMergedShape: (rebar) => {
-            for (let i = 0; i < rebar.segments.length - 1; i++) {
-                let seg1 = rebar.segments[i]; let seg2 = rebar.segments[i+1];
-                let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2); if (corner) { seg1.p2 = corner; seg2.p1 = corner; }
-            }
+        });
+        if (allSegmentsSettled && rebar.state !== "FORMED") { 
+            rebar.finalize(); // ⭐ 철근이 스스로를 교정합니다.
+            rebar.state = "FORMED"; 
         }
-    };
+    },
+    restoreSegmentLine: (seg) => {
+        let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
+        let dx = n2.x - n1.x; let dy = n2.y - n1.y; let dist = Math.sqrt(dx * dx + dy * dy); let ux, uy;
+        if (dist > 0.01) { ux = dx / dist; uy = dy / dist; if (ux * seg.uDir.x + uy * seg.uDir.y < 0) { ux = -ux; uy = -uy; } } else { ux = seg.uDir.x; uy = seg.uDir.y; }
+        let halfLen = seg.initialLen / 2; seg.p1 = { x: cx - ux * halfLen, y: cy - uy * halfLen }; seg.p2 = { x: cx + ux * halfLen, y: cy + uy * halfLen };
+    },
+    finalizeMergedShape: (rebar) => {
+        // 이제 rebar.finalize()를 통해 각 형상이 스스로 교정하므로, 이 함수는 레거시 지원용으로 남겨둡니다.
+        for (let i = 0; i < rebar.segments.length - 1; i++) {
+            let seg1 = rebar.segments[i]; let seg2 = rebar.segments[i+1];
+            let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2); if (corner) { seg1.p2 = corner; seg2.p1 = corner; }
+        }
+    }
+};
