@@ -1,5 +1,5 @@
 // =========================================================================
-//  3. REBAR AGENTS & PHYSICS (v016 - 44번 안정화 버전)
+//  3. REBAR AGENTS & PHYSICS (v017 - Shape 11 추가)
 // =========================================================================
 
 class RebarBase {
@@ -58,7 +58,50 @@ class RebarBase {
     }
 }
 
-// --- [Shape 21] 3마디 U자 철근 (레거시 지원) ---
+// --- [Shape 11] 2조각 L자 철근 (NEW) ---
+class Shape11 extends RebarBase {
+    generate() {
+        const {A, B} = this.dims; const {x, y} = this.center;
+        
+        // p1(상단) -> p2(코너) -> p3(우측)
+        let p1 = { x: x, y: y + A }; 
+        let p2 = { x: x, y: y }; 
+        let p3 = { x: x + B, y: y };
+
+        // 11번은 구석에 안착하므로, 수직재는 좌측(-1,0), 수평재는 하단(0,-1) 벽면을 탐색하도록 법선 부여
+        this.segments = [ 
+            this.makeSeg(p1, p2, {x: -1, y: 0}, "FITTING"), 
+            this.makeSeg(p2, p3, {x: 0, y: -1}, "WAITING") 
+        ];
+        this.applyRotation();
+        return this;
+    }
+
+    // ⭐ 물리 엔진 안착 후 11번 철근의 길이를 정확하게 복원
+    finalize() {
+        super.finalize(); // 내부 코너(p2) 교점 우선 정리
+
+        // [A 구간 (수직재) 교정] - 코너(p2)를 기준으로 위(p1)로 뻗어 나감
+        let segA = this.segments[0];
+        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
+        segA.p1 = {
+            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
+            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
+        };
+
+        // [B 구간 (수평재) 교정] - 코너(p1=p2)를 기준으로 우측(p2=p3)으로 뻗어 나감
+        let segB = this.segments[1];
+        let angleB = Math.atan2(segB.nodes[1].y - segB.nodes[0].y, segB.nodes[1].x - segB.nodes[0].x);
+        segB.p2 = {
+            x: segB.p1.x + Math.cos(angleB) * segB.initialLen,
+            y: segB.p1.y + Math.sin(angleB) * segB.initialLen
+        };
+
+        console.log(`[Shape11] L형 철근 안착 완료. 길이 A, B 복원 성공!`);
+    }
+}
+
+// --- [Shape 21] 3마디 U자 철근 ---
 class Shape21 extends RebarBase {
     generate() {
         const {A,B,C} = this.dims; const {x,y} = this.center;
@@ -93,11 +136,9 @@ class Shape44 extends RebarBase {
         return this;
     }
 
-    // ⭐ 핵심 로직: 물리 엔진이 찾은 벽면 기울기를 읽어와 날개(A, E)를 평행하게 뻗게 함 ⭐
     finalize() {
-        super.finalize(); // 내부 코너(B-C, C-D 교점) 먼저 정리
+        super.finalize(); 
 
-        // [A 구간 교정]
         let segA = this.segments[0];
         let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
         segA.p1 = {
@@ -105,22 +146,21 @@ class Shape44 extends RebarBase {
             y: segA.p2.y - Math.sin(angleA) * segA.initialLen
         };
 
-        // [E 구간 교정]
         let segE = this.segments[4];
         let angleE = Math.atan2(segE.nodes[1].y - segE.nodes[0].y, segE.nodes[1].x - segE.nodes[0].x);
         segE.p2 = {
             x: segE.p1.x + Math.cos(angleE) * segE.initialLen,
             y: segE.p1.y + Math.sin(angleE) * segE.initialLen
         };
-
-        console.log(`[Shape44] 길이는 고정, 각도는 슬래브 벽면에 맞춰 정렬 완료!`);
     }
 }
 
+// ⭐ Factory에 Shape 11 추가
 class RebarFactory { 
     static create(code, center, dims, rotation = 0) { 
         let r = null;
-        if(code === 21) r = new Shape21(center, dims, rotation);
+        if(code === 11) r = new Shape11(center, dims, rotation);  // 11번 등록
+        else if(code === 21) r = new Shape21(center, dims, rotation);
         else if(code === 44) r = new Shape44(center, dims, rotation);
         return r ? r.generate() : null;
     } 
@@ -145,7 +185,6 @@ const Physics = {
         rebar.debugPoints = []; let allSegmentsSettled = true;
 
         rebar.segments.forEach((seg, idx) => {
-            // 순차적 안착 (이전 세그먼트가 붙어야 다음이 움직임)
             if (seg.state === "WAITING") { 
                 allSegmentsSettled = false; 
                 if (idx > 0 && rebar.segments[idx-1].state === "SETTLED") seg.state = "FITTING"; 
@@ -170,14 +209,12 @@ const Physics = {
             }
         });
 
-        // 모든 마디가 안착 완료되면 최종 형상 교정 수행
         if (allSegmentsSettled && rebar.state !== "FORMED") { 
             rebar.finalize();
             rebar.state = "FORMED"; 
         }
     },
 
-    // 안착된 노드의 위치를 바탕으로 초기 길이를 복원하는 함수
     restoreSegmentLine: (seg) => {
         let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
         let dx = n2.x - n1.x; let dy = n2.y - n1.y; let dist = MathUtils.hypot(dx, dy); let ux, uy;
