@@ -112,6 +112,7 @@ class BoxGirder extends SectionBase {
             }
         }
 
+        // 2. 단면을 생성하는 메인 로직
         generate(inputString) {
             if (inputString) {
                 this.parsePscBox(inputString);
@@ -135,34 +136,38 @@ class BoxGirder extends SectionBase {
                 // 1. 외부 노드 (outerNodes) 계산
                 // =========================================================
                 let ptc = {x: 0, y: 0};
+                
+                // ⭐ 수학적 기울기 y = x * (Slope / 100) 적용 (절댓값 족쇄 제거)
                 let plc = {x: -WTL, y: -WTL * (SLL / 100)};
                 let plcb = {x: plc.x, y: plc.y - csLeft[csLeft.length - 1]};
-                let plwt = {x: webPos[0], y: -Math.abs(webPos[0]) * (SLL / 100) - csLeft[1]};
+                let plwt = {x: webPos[0], y: webPos[0] * (SLL / 100) - csLeft[1]};
                 
                 let leftHaunches = [];
                 let accLeftDist = 0; 
                 for (let i = 1; i < csLeft.length / 2; i++) {
                     accLeftDist += csLeft[i * 2]; 
                     let hx = webPos[0] - accLeftDist; 
-                    let hy = -Math.abs(hx) * (SLL / 100) - csLeft[i * 2 + 1]; 
+                    let hy = hx * (SLL / 100) - csLeft[i * 2 + 1]; 
                     leftHaunches.push({x: hx, y: hy});
                 }
                 
                 let pcb = {x: 0, y: -HT};
                 let plb = {x: -WBL, y: pcb.y};
                 let prb = {x: WBR, y: pcb.y};
-                let prwt = {x: webPos[webPos.length - 1], y: -Math.abs(webPos[webPos.length - 1]) * (SLR / 100) - csRight[1]};
+                
+                // ⭐ 우측도 순수 수학 공식 적용 (x가 양수이므로 SLR이 -면 자동으로 하강)
+                let prwt = {x: webPos[webPos.length - 1], y: webPos[webPos.length - 1] * (SLR / 100) - csRight[1]};
                 
                 let rightHaunches = [];
                 let accRightDist = 0; 
                 for (let i = 1; i < csRight.length / 2; i++) {
                     accRightDist += csRight[i * 2]; 
                     let hx = webPos[webPos.length - 1] + accRightDist; 
-                    let hy = -Math.abs(hx) * (SLR / 100) - csRight[i * 2 + 1];
+                    let hy = hx * (SLR / 100) - csRight[i * 2 + 1];
                     rightHaunches.push({x: hx, y: hy});
                 }
                 
-                let prc = {x: WTR, y: -WTR * (SLR / 100)};
+                let prc = {x: WTR, y: WTR * (SLR / 100)};
                 let prcb = {x: prc.x, y: prc.y - csRight[csRight.length - 1]};                
                 
                 outerNodes = [
@@ -174,7 +179,7 @@ class BoxGirder extends SectionBase {
                 ];
 
                 // =========================================================
-                // 2. 내부 셀 (innerNodes) 계산 (다중 셀 지원)
+                // 2. 내부 셀 (innerNodes) 계산
                 // =========================================================
                 const tsCells = data.TS || {}; 
                 const bsCells = data.BS || {}; 
@@ -187,7 +192,6 @@ class BoxGirder extends SectionBase {
                     let bsL = bsCells[cellId] ? bsCells[cellId][0] : [0, 0, 0, 0];
                     let bsR = bsCells[cellId] ? bsCells[cellId][1] : [0, 0, 0, 0];
 
-                    // ① 좌/우 복부 내측 선 생성 
                     let in_L_web = geo_offset(plwt, plb, webThick[0]);
                     let inL_p1 = {x: in_L_web.x1, y: in_L_web.y1};
                     let inL_p2 = {x: in_L_web.x2, y: in_L_web.y2};
@@ -196,20 +200,19 @@ class BoxGirder extends SectionBase {
                     let inR_p1 = {x: in_R_web.x1, y: in_R_web.y1};
                     let inR_p2 = {x: in_R_web.x2, y: in_R_web.y2};
 
-                    // ② 상부 슬래브 (TS) 교점 및 헌치 계산
+                    // ⭐ 내부 셀 상부 헌치도 순수 수학 공식 적용
                     let tsL_line_p1 = { x: 0, y: -tsL[1] };
                     let tsL_line_p2 = { x: -10000, y: -10000 * (SLL / 100) - tsL[1] };
                     let p_tsL_root = geo_intersect(inL_p1, inL_p2, tsL_line_p1, tsL_line_p2);
                     let tipL_x = p_tsL_root.x + tsL[2]; 
-                    let p_tsL_tip = { x: tipL_x, y: -Math.abs(tipL_x) * (SLL / 100) - tsL[3] };
+                    let p_tsL_tip = { x: tipL_x, y: tipL_x * (SLL / 100) - tsL[3] };
 
                     let tsR_line_p1 = { x: 0, y: -tsR[1] };
-                    let tsR_line_p2 = { x: 10000, y: -10000 * (SLR / 100) - tsR[1] };
+                    let tsR_line_p2 = { x: 10000, y: 10000 * (SLR / 100) - tsR[1] };
                     let p_tsR_root = geo_intersect(inR_p1, inR_p2, tsR_line_p1, tsR_line_p2);
                     let tipR_x = p_tsR_root.x - tsR[2];
-                    let p_tsR_tip = { x: tipR_x, y: -Math.abs(tipR_x) * (SLR / 100) - tsR[3] };
+                    let p_tsR_tip = { x: tipR_x, y: tipR_x * (SLR / 100) - tsR[3] };
 
-                    // ③ 하부 슬래브 (BS) 교점 및 헌치 계산
                     let bsL_line_p1 = { x: 0, y: -HT + bsL[1] };
                     let bsL_line_p2 = { x: -10000, y: -HT + bsL[1] };
                     let p_bsL_root = geo_intersect(inL_p1, inL_p2, bsL_line_p1, bsL_line_p2);
@@ -220,7 +223,6 @@ class BoxGirder extends SectionBase {
                     let p_bsR_root = geo_intersect(inR_p1, inR_p2, bsR_line_p1, bsR_line_p2);
                     let p_bsR_tip = { x: p_bsR_root.x - bsR[2], y: -HT + bsR[3] };
 
-                    // ④ 시계방향으로 1개 방(Cell)을 폐합하여 배열에 꽂아 넣기
                     innerNodes[cellIndex] = [
                         p_tsL_root, p_tsL_tip, p_tsR_tip, p_tsR_root,
                         p_bsR_root, p_bsR_tip, p_bsL_tip, p_bsL_root
