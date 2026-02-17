@@ -137,7 +137,7 @@
             // (2) 파싱된 데이터가 있을 경우 변수 추출 (디버깅용)
             if (this.parsedData) {
                 const data = this.parsedData;
-                const { HT, WTL, WTR, WBL, SBR, SLL, SLR } = data.BOX;
+                const { HT, WTL, WTR, WBL, WBR, SLL, SLR } = data.BOX;
                 const csLeft = data.CS ? data.CS.L : [];   
                 const csRight = data.CS ? data.CS.R : [];  
                 const webThick = data.WB || [];
