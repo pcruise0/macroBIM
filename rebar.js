@@ -100,28 +100,33 @@
         }
 
         finalize() {
-            // 1. 우선 부모의 기능을 실행해서 코너(B-C, C-D)들을 먼저 닫습니다.
+            // 1. 먼저 부모 클래스의 기능을 실행하여 내부 코너(B-C, C-D 등) 교점을 정리합니다.
+            // 이 과정이 끝나면 segA.p2와 segE.p1이 코너 좌표로 확정됩니다.
             super.finalize();
     
-            // 2. 이제 Shape44만의 정체성을 지킵니다. (A, E 구간 복원)
-            let n = this.segments.length;
-            
-            // A 구간 (첫 번째 세그먼트)
-            let first = this.segments[0];
-            first.p1 = { 
-                x: first.p2.x - first.uDir.x * first.initialLen, 
-                y: first.p2.y - first.uDir.y * first.initialLen 
+            // 2. [A 구간 교정] 물리 엔진이 찾은 실제 벽면의 각도를 읽어옵니다.
+            let segA = this.segments[0];
+            // 물리 연산으로 안착된 노드들의 좌표 차이를 통해 실제 기울기(angle) 산출
+            let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
+    
+            // p2(코너점)는 고정하고, 각도는 angleA를 따르며, 길이는 initialLen만큼 역방향으로 뻗음
+            segA.p1 = {
+                x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
+                y: segA.p2.y - Math.sin(angleA) * segA.initialLen
             };
     
-            // E 구간 (마지막 세그먼트)
-            let last = this.segments[n - 1];
-            last.p2 = { 
-                x: last.p1.x + last.uDir.x * last.initialLen, 
-                y: last.p1.y + last.uDir.y * last.initialLen 
+            // 3. [E 구간 교정] 물리 엔진이 찾은 실제 벽면의 각도를 읽어옵니다.
+            let segE = this.segments[this.segments.length - 1];
+            let angleE = Math.atan2(segE.nodes[1].y - segE.nodes[0].y, segE.nodes[1].x - segE.nodes[0].x);
+    
+            // p1(코너점)은 고정하고, 각도는 angleE를 따르며, 길이는 initialLen만큼 정방향으로 뻗음
+            segE.p2 = {
+                x: segE.p1.x + Math.cos(angleE) * segE.initialLen,
+                y: segE.p1.y + Math.sin(angleE) * segE.initialLen
             };
-            
-            console.log(`[Shape44] ID: ${this.id} 형상 교정 완료!`);
-        }        
+    
+            console.log(`[Shape44] ${this.id}: 길이는 고정, 각도는 슬래브 벽면에 맞춰 정렬 완료!`);
+        }    
     }
 
     class RebarFactory { 
