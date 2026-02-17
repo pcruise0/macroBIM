@@ -65,32 +65,21 @@ class RebarBase {
         generate() {
             const {A,B,C,D,E} = this.dims; const {x,y} = this.center;
             
-            // 1. 주요 꼭짓점 6개를 좌측에서 우측 순서대로 정의 (한붓그리기 순서)
-            // P1: 좌측 상단 A 끝점 (가장 왼쪽)
+            // 1. 꼭짓점 정의 (한붓그리기 순서)
             let p1 = { x: x - C/2 - A, y: y + B };
-            // P2: 좌측 상단 코너 (A와 B가 만나는 점)
             let p2 = { x: x - C/2,     y: y + B };
-            // P3: 좌측 하단 코너 (B와 C가 만나는 점)
             let p3 = { x: x - C/2,     y: y };
-            // P4: 우측 하단 코너 (C와 D가 만나는 점)
             let p4 = { x: x + C/2,     y: y };
-            // P5: 우측 상단 코너 (D와 E가 만나는 점)
             let p5 = { x: x + C/2,     y: y + D };
-            // P6: 우측 상단 E 끝점 (가장 오른쪽)
             let p6 = { x: x + C/2 + E, y: y + D };
 
-            // 2. 순서대로 선분 생성 (법선 벡터 방향 주의: U자 내측을 향하도록)
+            // 2. 선분 생성 및 법선 벡터 교정 (벽면을 바라보도록)
             this.segments = [ 
-                // Seg A (P1 -> P2): 상단 수평 (법선: 위쪽)
-                this.makeSeg(p1, p2, {x:0, y:1}, "FITTING"), 
-                // Seg B (P2 -> P3): 좌측 수직 (법선: 오른쪽=내측)
-                this.makeSeg(p2, p3, {x:1, y:0}, "WAITING"), 
-                // Seg C (P3 -> P4): 하단 수평 (법선: 위쪽=내측)
-                this.makeSeg(p3, p4, {x:0, y:1}, "WAITING"), 
-                // Seg D (P4 -> P5): 우측 수직 (법선: 왼쪽=내측)
-                this.makeSeg(p4, p5, {x:-1, y:0}, "WAITING"), 
-                // Seg E (P5 -> P6): 상단 수평 (법선: 위쪽)
-                this.makeSeg(p5, p6, {x:0, y:1}, "WAITING") 
+                this.makeSeg(p1, p2, {x:0, y:1}, "FITTING"),  // A: 위로
+                this.makeSeg(p2, p3, {x:-1, y:0}, "WAITING"), // B: 왼쪽으로
+                this.makeSeg(p3, p4, {x:0, y:-1}, "WAITING"), // C: 아래로 (수정됨!)
+                this.makeSeg(p4, p5, {x:1, y:0}, "WAITING"),  // D: 오른쪽으로
+                this.makeSeg(p5, p6, {x:0, y:1}, "WAITING")   // E: 위로
             ];
             
             this.applyRotation();
