@@ -240,7 +240,7 @@ class Shape21 extends RebarBase {
 class Shape25 extends RebarBase {
     generate() {
         const {A, B, C} = this.dims; const {x, y} = this.center;
-        let rad = 60 * Math.PI / 180;
+        let rad = 30 * Math.PI / 180;
         
         let p2 = { x: x - B/2, y: y };
         let p3 = { x: x + B/2, y: y };
