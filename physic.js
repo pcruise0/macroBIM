@@ -1,13 +1,14 @@
-// --- 물리 엔진 (v006 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v008 - RAY/FIT Ends Support) ---
 const Physics = {
     // 1. 중력장 탐색 (기존 로직 유지)
     getGravityTarget: (px, py, segNormal, walls) => {
-        let minDist = Infinity; let target = null; const OPPOSITE_THRESHOLD = -0.9; 
+        let minDist = Infinity; let target = null;
+        //const OPPOSITE_THRESHOLD = -0.9; 
         
         walls.forEach(w => {
             // 철근 방향과 마주보는 벽인지 확인
             let dot = w.nx * segNormal.x + w.ny * segNormal.y; 
-            if (dot > OPPOSITE_THRESHOLD) return;
+            //if (dot > OPPOSITE_THRESHOLD) return;
             
             // 피복 두께 적용
             let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER }; 
