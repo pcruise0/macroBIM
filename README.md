@@ -1,4 +1,5 @@
 REBAR INPUT
+/*
 {
     id: "SMART_REBAR_01",
     code: 44,             : 철근 shape code - BS8666
@@ -19,3 +20,4 @@ REBAR INPUT
         E: { type: "RAY", val: -40 }   // End: 광선(Ray) 쏘고 피복만큼 후퇴
     }
 }
+*/
