@@ -1,12 +1,10 @@
-// =========================================================================
-//  3. REBAR AGENTS & PHYSICS (v017 - Shape 11 추가)
-// =========================================================================
-
 class RebarBase {
-    constructor(center, dims, rotation = 0) { 
+    constructor(center, dims, rotation = 0, ang = null, nor = null) { 
         this.center = center; 
         this.dims = dims; 
         this.rotation = rotation;
+        this.ang = ang; 
+        this.nor = nor; 
         this.segments = []; 
         this.state = "ASSEMBLING"; 
         this.debugPoints = []; 
@@ -14,7 +12,6 @@ class RebarBase {
 
     makeSeg(p1, p2, normal, initialState) {
         let nodes = []; 
-        // 물리 엔진이 힘을 받을 노드 위치 (40%, 60% 지점)
         CONFIG.PHYSICS.NODE_POS.forEach(ratio => { 
             nodes.push({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio, vx: 0, vy: 0 }); 
         });
@@ -44,280 +41,99 @@ class RebarBase {
         });
     }
 
-    // 공통 교정 로직: 내부 코너의 교점 정리
+    buildSequential(lengths, initAngle, defaultAng, defaultNor, getAnchorPos) {
+        // ⭐ 세그먼트용 키(A, B, C)와 각도용 키(RA, RB, RC)를 엄격히 분리!
+        const segKeys = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+        const angKeys = ['RA', 'RB', 'RC', 'RD', 'RE', 'RF'];
+
+        let angArray = defaultAng.map((def, i) => (this.ang && this.ang[angKeys[i]] !== undefined) ? this.ang[angKeys[i]] : def);
+        let norArray = defaultNor.map((def, i) => (this.nor && this.nor[segKeys[i]] !== undefined) ? this.nor[segKeys[i]] : def);
+
+        let pts = [{x: 0, y: 0}];
+        let currentAngle = initAngle;
+
+        for (let i = 0; i < lengths.length; i++) {
+            if (i > 0) currentAngle += angArray[i - 1]; 
+            let rad = currentAngle * Math.PI / 180;
+            let prev = pts[i];
+            pts.push({
+                x: prev.x + lengths[i] * Math.cos(rad),
+                y: prev.y + lengths[i] * Math.sin(rad)
+            });
+        }
+
+        let anchor = getAnchorPos(pts);
+        let dx = this.center.x - anchor.x;
+        let dy = this.center.y - anchor.y;
+        pts.forEach(p => { p.x += dx; p.y += dy; });
+
+        this.segments = [];
+        for (let i = 0; i < lengths.length; i++) {
+            let p1 = pts[i]; let p2 = pts[i+1];
+            let vx = p2.x - p1.x; let vy = p2.y - p1.y;
+            let len = MathUtils.hypot(vx, vy);
+            let ux = vx / len; let uy = vy / len;
+            
+            let nSign = norArray[i];
+            let nx = nSign === 1 ? -uy : uy;
+            let ny = nSign === 1 ? ux : -ux;
+            
+            let state = (i === 0) ? "FITTING" : "WAITING";
+            this.segments.push(this.makeSeg(p1, p2, {x: nx, y: ny}, state));
+        }
+
+        this.applyRotation();
+        return this;
+    }
+
     finalize() {
         for (let i = 0; i < this.segments.length - 1; i++) {
-            let seg1 = this.segments[i];
-            let seg2 = this.segments[i+1];
+            let seg1 = this.segments[i]; let seg2 = this.segments[i+1];
             let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2);
-            if (corner) { 
-                seg1.p2 = corner; 
-                seg2.p1 = corner; 
-            }
+            if (corner) { seg1.p2 = corner; seg2.p1 = corner; }
+        }
+
+        if (this.segments.length > 0) {
+            let first = this.segments[0];
+            let angF = Math.atan2(first.nodes[1].y - first.nodes[0].y, first.nodes[1].x - first.nodes[0].x);
+            first.p1 = { x: first.p2.x - Math.cos(angF) * first.initialLen, y: first.p2.y - Math.sin(angF) * first.initialLen };
+        }
+
+        if (this.segments.length > 1) {
+            let last = this.segments[this.segments.length - 1];
+            let angL = Math.atan2(last.nodes[1].y - last.nodes[0].y, last.nodes[1].x - last.nodes[0].x);
+            last.p2 = { x: last.p1.x + Math.cos(angL) * last.initialLen, y: last.p1.y + Math.sin(angL) * last.initialLen };
         }
     }
 }
 
-// --- [Shape 11] 2조각 L자 철근 (NEW) ---
-class Shape11 extends RebarBase {
-    generate() {
-        const {A, B} = this.dims; const {x, y} = this.center;
-        
-        // p1(상단) -> p2(코너) -> p3(우측)
-        let p1 = { x: x, y: y + A }; 
-        let p2 = { x: x, y: y }; 
-        let p3 = { x: x + B, y: y };
 
-        // 11번은 구석에 안착하므로, 수직재는 좌측(-1,0), 수평재는 하단(0,-1) 벽면을 탐색하도록 법선 부여
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x: -1, y: 0}, "FITTING"), 
-            this.makeSeg(p2, p3, {x: 0, y: -1}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    // ⭐ 물리 엔진 안착 후 11번 철근의 길이를 정확하게 복원
-    finalize() {
-        super.finalize(); // 내부 코너(p2) 교점 우선 정리
-
-        // [A 구간 (수직재) 교정] - 코너(p2)를 기준으로 위(p1)로 뻗어 나감
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = {
-            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
-            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
-        };
-
-        // [B 구간 (수평재) 교정] - 코너(p1=p2)를 기준으로 우측(p2=p3)으로 뻗어 나감
-        let segB = this.segments[1];
-        let angleB = Math.atan2(segB.nodes[1].y - segB.nodes[0].y, segB.nodes[1].x - segB.nodes[0].x);
-        segB.p2 = {
-            x: segB.p1.x + Math.cos(angleB) * segB.initialLen,
-            y: segB.p1.y + Math.sin(angleB) * segB.initialLen
-        };
-
-        console.log(`[Shape11] L형 철근 안착 완료. 길이 A, B 복원 성공!`);
-    }
-}
-
-// --- [Shape 12] 2조각 반전 L자 철근 (우측 코너용) ---
-class Shape12 extends RebarBase {
-    generate() {
-        const {A, B} = this.dims; const {x, y} = this.center;
-        
-        // p1(상단) -> p2(우측 코너) -> p3(좌측으로 뻗음)
-        let p1 = { x: x, y: y + A }; 
-        let p2 = { x: x, y: y }; 
-        let p3 = { x: x - B, y: y }; // 11번과 반대로 왼쪽으로 뻗어나감
-
-        // 수직재는 우측(1,0) 벽면을, 수평재는 하단(0,-1) 벽면을 탐색하도록 법선 부여
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x: 1, y: 0}, "FITTING"), 
-            this.makeSeg(p2, p3, {x: 0, y: -1}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    // ⭐ 물리 엔진 안착 후 12번 철근의 길이를 정확하게 복원 (11번과 수학적 원리는 동일)
-    finalize() {
-        super.finalize(); // 내부 코너(p2) 교점 우선 정리
-
-        // [A 구간 (수직재) 교정] - 코너(p2)를 기준으로 위(p1)로 뻗어 나감
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = {
-            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
-            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
-        };
-
-        // [B 구간 (수평재) 교정] - 코너(p1=p2)를 기준으로 좌측(p2=p3)으로 뻗어 나감
-        let segB = this.segments[1];
-        let angleB = Math.atan2(segB.nodes[1].y - segB.nodes[0].y, segB.nodes[1].x - segB.nodes[0].x);
-        segB.p2 = {
-            x: segB.p1.x + Math.cos(angleB) * segB.initialLen,
-            y: segB.p1.y + Math.sin(angleB) * segB.initialLen
-        };
-
-        console.log(`[Shape12] 반전 L형 철근 안착 완료. 길이 A, B 복원 성공!`);
-    }
-}
-
-// --- [Shape 13] V형 철근 (내각 140도, 각 세그먼트 직각 법선 적용) ---
-class Shape13 extends RebarBase {
-    generate() {
-        const {A, B} = this.dims; const {x, y} = this.center;
-        
-        // 내각 140도를 위해 수평 기준 양쪽으로 20도씩 기울임
-        let rad = 20 * Math.PI / 180;
-        
-        // p1(좌측 상단) -> p2(V자 꼭짓점, 중앙 하단) -> p3(우측 상단)
-        let p1 = { x: x - A * Math.cos(rad), y: y + A * Math.sin(rad) };
-        let p2 = { x: x, y: y }; 
-        let p3 = { x: x + B * Math.cos(rad), y: y + B * Math.sin(rad) };
-
-        // ⭐ 각 세그먼트 방향에 '직각'이면서 아래쪽 헌치 면을 향하는 법선(Normal) 계산
-        // 1. 선분 A (p1 -> p2)의 직각 법선
-        let nx1 = -Math.sin(rad);
-        let ny1 = -Math.cos(rad);
-        
-        // 2. 선분 B (p2 -> p3)의 직각 법선
-        let nx2 = Math.sin(rad);
-        let ny2 = -Math.cos(rad);
-
-        // 계산된 직각 법선 벡터를 FITTING과 WAITING에 각각 부여
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
-            this.makeSeg(p2, p3, {x: nx2, y: ny2}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    // ⭐ 안착 후 교점(p2)을 기준으로 원래의 길이 A, B를 정확하게 복원
-    finalize() {
-        super.finalize(); // 내부 코너(p2) 교점 우선 정리
-
-        // [A 구간 (좌측 날개)] - 꼭짓점(p2)에서 좌측 상단(p1)으로 뻗어 나감
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = {
-            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
-            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
-        };
-
-        // [B 구간 (우측 날개)] - 꼭짓점(p1=p2)에서 우측 상단(p3=p2)으로 뻗어 나감
-        let segB = this.segments[1];
-        let angleB = Math.atan2(segB.nodes[1].y - segB.nodes[0].y, segB.nodes[1].x - segB.nodes[0].x);
-        segB.p2 = {
-            x: segB.p1.x + Math.cos(angleB) * segB.initialLen,
-            y: segB.p1.y + Math.sin(angleB) * segB.initialLen
-        };
-
-        console.log(`[Shape13] V형 철근 안착 완료. (내각 140도, 직각 법선 적용됨)`);
-    }
-}
-
-// --- [Shape 21] U형 철근 (양단 60도, 하단 밀착) ---
+// --- [Shape 21] 3조각 기본형 ---
 class Shape21 extends RebarBase {
     generate() {
-        const {A, B, C} = this.dims; const {x, y} = this.center;
-        let rad = 60 * Math.PI / 180; // 바닥에서 60도
-        
-        // p1(좌측 상단) -> p2(좌측 하단) -> p3(우측 하단) -> p4(우측 상단)
-        let p2 = { x: x - B/2, y: y };
-        let p3 = { x: x + B/2, y: y };
-        let p1 = { x: p2.x - A * Math.cos(rad), y: p2.y + A * Math.sin(rad) };
-        let p4 = { x: p3.x + C * Math.cos(rad), y: p3.y + C * Math.sin(rad) };
-
-        // 선분 방향에 직각이면서 '아래쪽(바깥쪽)'을 향하는 법선 벡터
-        let nx1 = -Math.sin(rad); let ny1 = -Math.cos(rad); // 좌측 날개
-        let nx3 = Math.sin(rad);  let ny3 = -Math.cos(rad); // 우측 날개
-
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
-            this.makeSeg(p2, p3, {x: 0, y: -1}, "WAITING"), 
-            this.makeSeg(p3, p4, {x: nx3, y: ny3}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    finalize() {
-        super.finalize(); 
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = { x: segA.p2.x - Math.cos(angleA) * segA.initialLen, y: segA.p2.y - Math.sin(angleA) * segA.initialLen };
-
-        let segC = this.segments[2];
-        let angleC = Math.atan2(segC.nodes[1].y - segC.nodes[0].y, segC.nodes[1].x - segC.nodes[0].x);
-        segC.p2 = { x: segC.p1.x + Math.cos(angleC) * segC.initialLen, y: segC.p1.y + Math.sin(angleC) * segC.initialLen };
+        let A = this.dims.A || 400; let B = this.dims.B || 400; let C = this.dims.C || 400;
+        return this.buildSequential([A, B, C], -90, [90, 90], [-1, -1, -1], (pts) => ({ x: pts[1].x + B/2, y: pts[1].y }));
     }
 }
 
-// --- [Shape 25] 상향 U형 철근 (양단 60도, 상단 밀착) ---
-class Shape25 extends RebarBase {
+// --- [Shape 41 / 44] 5조각 기본형 ---
+class Shape41 extends RebarBase {
     generate() {
-        const {A, B, C} = this.dims; const {x, y} = this.center;
-        let rad = 30 * Math.PI / 180;
-        
-        let p2 = { x: x - B/2, y: y };
-        let p3 = { x: x + B/2, y: y };
-        let p1 = { x: p2.x - A * Math.cos(rad), y: p2.y + A * Math.sin(rad) };
-        let p4 = { x: p3.x + C * Math.cos(rad), y: p3.y + C * Math.sin(rad) };
-
-        // 21번과 반대로 '위쪽(안쪽)'을 향하는 법선 벡터 (180도 반전)
-        let nx1 = -Math.sin(rad); let ny1 = -Math.cos(rad); // 좌측 날개
-        let nx3 = Math.sin(rad);  let ny3 = -Math.cos(rad); // 우측 날개
-
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
-            this.makeSeg(p2, p3, {x: 0, y: 1}, "WAITING"), // 가운데 구간 위쪽(1) 향함
-            this.makeSeg(p3, p4, {x: nx3, y: ny3}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    finalize() {
-        super.finalize(); 
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = { x: segA.p2.x - Math.cos(angleA) * segA.initialLen, y: segA.p2.y - Math.sin(angleA) * segA.initialLen };
-
-        let segC = this.segments[2];
-        let angleC = Math.atan2(segC.nodes[1].y - segC.nodes[0].y, segC.nodes[1].x - segC.nodes[0].x);
-        segC.p2 = { x: segC.p1.x + Math.cos(angleC) * segC.initialLen, y: segC.p1.y + Math.sin(angleC) * segC.initialLen };
+        let A = this.dims.A || 500; let B = this.dims.B || 1800; 
+        let C = this.dims.C || 400; let D = this.dims.D || 1800; let E = this.dims.E || 500;
+        return this.buildSequential(
+            [A, B, C, D, E], 0, [-90, 90, 90, -90], [1, -1, -1, -1, 1],
+            (pts) => ({ x: pts[2].x + C/2, y: pts[2].y })
+        );
     }
 }
 
-// --- [Shape 44] 표준 U자 철근 (날개 포함) ---
-class Shape44 extends RebarBase {
-    generate() {
-        const {A,B,C,D,E} = this.dims; const {x,y} = this.center;
-        let p1 = { x: x - C/2 - A, y: y + B }; let p2 = { x: x - C/2, y: y + B }; let p3 = { x: x - C/2, y: y };
-        let p4 = { x: x + C/2, y: y }; let p5 = { x: x + C/2, y: y + D }; let p6 = { x: x + C/2 + E, y: y + D };
-        this.segments = [ 
-            this.makeSeg(p1, p2, {x:0, y:1}, "FITTING"), 
-            this.makeSeg(p2, p3, {x:-1, y:0}, "WAITING"), 
-            this.makeSeg(p3, p4, {x:0, y:-1}, "WAITING"), 
-            this.makeSeg(p4, p5, {x:1, y:0}, "WAITING"), 
-            this.makeSeg(p5, p6, {x:0, y:1}, "WAITING") 
-        ];
-        this.applyRotation();
-        return this;
-    }
-
-    finalize() {
-        super.finalize(); 
-
-        let segA = this.segments[0];
-        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
-        segA.p1 = {
-            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
-            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
-        };
-
-        let segE = this.segments[4];
-        let angleE = Math.atan2(segE.nodes[1].y - segE.nodes[0].y, segE.nodes[1].x - segE.nodes[0].x);
-        segE.p2 = {
-            x: segE.p1.x + Math.cos(angleE) * segE.initialLen,
-            y: segE.p1.y + Math.sin(angleE) * segE.initialLen
-        };
-    }
-}
-
-// ⭐ Factory에 Shape 13 추가
 class RebarFactory { 
-    static create(code, center, dims, rotation = 0) { 
+    static create(code, center, dims, rotation = 0, ang = null, nor = null) { 
         let r = null;
-        if(code === 11) r = new Shape11(center, dims, rotation);
-        else if(code === 12) r = new Shape12(center, dims, rotation); // <--- 여기 추가!
-        else if(code === 13) r = new Shape13(center, dims, rotation); // <--- 여기 추가!
-        else if(code === 21) r = new Shape21(center, dims, rotation);
-        else if(code === 25) r = new Shape25(center, dims, rotation);
-        else if(code === 44) r = new Shape44(center, dims, rotation);
+        if(code === 11) r = new Shape11(center, dims, rotation, ang, nor);
+        else if(code === 21) r = new Shape21(center, dims, rotation, ang, nor);
+        else if(code === 41 || code === 44) r = new Shape41(center, dims, rotation, ang, nor);
         return r ? r.generate() : null;
     } 
 }
