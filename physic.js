@@ -1,4 +1,4 @@
-// --- 물리 엔진 (v024 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v003 - RAY/FIT Ends Support) ---
 const Physics = {
     // 1. 중력장 탐색 (기존 로직 유지)
     getGravityTarget: (px, py, segNormal, walls) => {
@@ -119,43 +119,50 @@ const Physics = {
         seg.p2 = { x: cx + ux * halfLen, y: cy + uy * halfLen };
     },
 
-    // ⭐ 4. [신규 추가] 단부 처리 로직 (FIT / RAY)
-    applyRebarEnds: (rebar, walls) => {
-        if (!rebar.ends) return; // 설정 없으면 패스
+// ⭐ 전역 헬퍼: 점 P를 직선(Origin, Dir)에 수직 투영(Projection)하는 함수
+    projectPointToLine: (point, lineOrigin, lineDir) => {
+        // 투영 공식: Proj = Origin + ( (Point - Origin) • Dir ) * Dir
+        let dx = point.x - lineOrigin.x;
+        let dy = point.y - lineOrigin.y;
+        let dot = dx * lineDir.x + dy * lineDir.y;
+        
+        return {
+            x: lineOrigin.x + dot * lineDir.x,
+            y: lineOrigin.y + dot * lineDir.y
+        };
+    },
+
+applyRebarEnds: (rebar, walls) => {
+        if (!rebar.ends) return;
 
         // 1. Begin Point (B) 처리
         if (rebar.ends.B) {
             let { type, val } = rebar.ends.B;
-            let firstSeg = rebar.segments[0];
+            let seg = rebar.segments[0];
 
-            if (type === "FIT") {
-                // [FIT] 현재 붙어있는 벽의 시작점으로 이동
-                // contactWall은 updatePhysics에서 기록됨
-                if (firstSeg.contactWall) {
-                    let wallStart = { x: firstSeg.contactWall.x1, y: firstSeg.contactWall.y1 };
-                    // 벡터 연산: 벽 시작점 방향으로 길이 조정 (여기서는 단순 할당보다 정교한 투영 필요할 수 있으나, 일단 좌표 강제)
-                    // 실제로는 벽 라인 위에서의 투영점이 더 정확하지만, FIT의 의미상 벽 끝점으로 이동.
-                    // val(오프셋) 적용: 방향 벡터를 고려해야 함.
-                    // 여기서는 간단히 '벽 끝점'으로 이동 후, 세그먼트 방향으로 val만큼 이동 구현
-                    let newP1 = { 
-                        x: wallStart.x - firstSeg.uDir.x * val, // 역방향이므로 -val? (정의에 따라 다름. 여기선 진행방향 기준 val만큼 더 뻗음으로 가정)
-                        y: wallStart.y - firstSeg.uDir.y * val 
-                    };
-                    firstSeg.p1 = newP1;
-                }
+            if (type === "FIT" && seg.contactWall) {
+                // ⭐ [보정] 벽체 좌표에도 피복(COVER) 적용 필수!
+                let w = seg.contactWall;
+                // Start 지점 FIT은 벽의 시작점(p1) 기준
+                let shiftedWallP1 = { 
+                    x: w.x1 + w.nx * CONFIG.COVER, 
+                    y: w.y1 + w.ny * CONFIG.COVER 
+                };
+
+                // 투영 수행 (Shifted Point -> Rebar Line)
+                let projected = Physics.projectPointToLine(shiftedWallP1, seg.p1, seg.uDir);
+
+                // 최종 위치 설정 (투영점 + 방향 * val)
+                seg.p1 = {
+                    x: projected.x + seg.uDir.x * val, 
+                    y: projected.y + seg.uDir.y * val
+                };
             } 
             else if (type === "RAY") { 
-                // [RAY] 뒤쪽(반대) 방향으로 레이저 발사
-                let rayDir = { x: -firstSeg.uDir.x, y: -firstSeg.uDir.y };
-                let hit = Physics.rayCastGlobal(firstSeg.p1, rayDir, walls); // 전역 레이캐스팅 함수 필요
+                let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y }; 
+                let hit = Physics.rayCastGlobal(seg.p1, rayDir, walls);
                 if (hit) {
-                    // hit point에서 val만큼 이동 (보통 val은 피복 두께인 음수)
-                    // hit.point + rayDir * (-val) ? -> val이 -40이면 뒤로 40만큼. 즉 안쪽으로.
-                    // 수식: P_new = Hit + RayDir * val (val이 음수면 Ray 반대방향=안쪽)
-                    firstSeg.p1 = {
-                        x: hit.x + rayDir.x * val,
-                        y: hit.y + rayDir.y * val
-                    };
+                    seg.p1 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
                 }
             }
         }
@@ -163,36 +170,36 @@ const Physics = {
         // 2. End Point (E) 처리
         if (rebar.ends.E) {
             let { type, val } = rebar.ends.E;
-            let lastSeg = rebar.segments[rebar.segments.length - 1];
+            let seg = rebar.segments[rebar.segments.length - 1];
 
-            if (type === "FIT") {
-                // [FIT] 현재 붙어있는 벽의 끝점으로 이동
-                if (lastSeg.contactWall) {
-                    let wallEnd = { x: lastSeg.contactWall.x2, y: lastSeg.contactWall.y2 };
-                    let newP2 = {
-                        x: wallEnd.x + lastSeg.uDir.x * val, // 정방향 연장
-                        y: wallEnd.y + lastSeg.uDir.y * val
-                    };
-                    lastSeg.p2 = newP2;
-                }
+            if (type === "FIT" && seg.contactWall) {
+                // ⭐ [보정] 벽체 좌표에도 피복(COVER) 적용
+                let w = seg.contactWall;
+                // End 지점 FIT은 벽의 끝점(p2) 기준
+                let shiftedWallP2 = { 
+                    x: w.x2 + w.nx * CONFIG.COVER, 
+                    y: w.y2 + w.ny * CONFIG.COVER 
+                };
+
+                // 투영 수행
+                let projected = Physics.projectPointToLine(shiftedWallP2, seg.p2, seg.uDir);
+
+                // 최종 위치 설정
+                seg.p2 = {
+                    x: projected.x + seg.uDir.x * val,
+                    y: projected.y + seg.uDir.y * val
+                };
             } 
             else if (type === "RAY") {
-                // [RAY] 앞쪽(정) 방향으로 레이저 발사
-                let rayDir = lastSeg.uDir;
-                let hit = Physics.rayCastGlobal(lastSeg.p2, rayDir, walls);
+                let rayDir = seg.uDir; 
+                let hit = Physics.rayCastGlobal(seg.p2, rayDir, walls);
                 if (hit) {
-                    lastSeg.p2 = {
-                        x: hit.x + rayDir.x * val, // val이 음수면 안쪽으로 후퇴
-                        y: hit.y + rayDir.y * val
-                    };
+                    seg.p2 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
                 }
             }
         }
-        
-        // 변경된 p1, p2에 맞춰 길이(initialLen) 재계산 (선택 사항)
-        // rebar.finalize()에서 교점 정리하면서 다시 다듬어질 것임.
     },
-
+    
     // ⭐ 5. [신규 추가] 전역 레이캐스팅 헬퍼
     rayCastGlobal: (origin, dir, walls) => {
         let bestHit = null;
