@@ -107,6 +107,13 @@ class RebarBase {
     }
 }
 
+// --- [Shape 11] 2조각 기본형 ---
+class Shape11 extends RebarBase {
+    generate() {
+        let A = this.dims.A || 400; let B = this.dims.B || 400;
+        return this.buildSequential([A, B], -90, [90], [-1, -1], (pts) => pts[1]);
+    }
+}
 
 // --- [Shape 21] 3조각 기본형 ---
 class Shape21 extends RebarBase {
