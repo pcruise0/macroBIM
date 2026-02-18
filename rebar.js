@@ -160,7 +160,8 @@ class Shape41 extends RebarBase {
 class RebarFactory { 
     static create(code, center, dims, rotation = 0, ang = null, nor = null) { 
         let r = null;
-        if(code === 11) r = new Shape11(center, dims, rotation, ang, nor);
+        if(code === 1) r = new Shape01(center, dims, rotation, ang, nor);
+        else if(code === 11) r = new Shape11(center, dims, rotation, ang, nor);
         else if(code === 21) r = new Shape21(center, dims, rotation, ang, nor);
         else if(code === 41 || code === 44) r = new Shape41(center, dims, rotation, ang, nor);
         return r ? r.generate() : null;
