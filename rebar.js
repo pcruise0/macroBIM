@@ -1,3 +1,4 @@
+// v029
 class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
@@ -142,10 +143,52 @@ class Shape41 extends RebarBase {
 }
 
 // ⭐ [수정 3] Factory: angs, nors, ends 파라미터 추가
+// --- RebarFactory (Case Insensitive & Simplified) ---
 class RebarFactory { 
+    // ⭐ 헬퍼: 키를 소문자로 통일하고 값을 매핑하는 함수
+    static normalizeParams(data) {
+        const normalized = {};
+        // 1. 최상위 키 소문자 변환 (Dims -> dims, Angs -> angs...)
+        Object.keys(data).forEach(key => {
+            normalized[key.toLowerCase()] = data[key];
+        });
+        return normalized;
+    }
+
+    // ⭐ 헬퍼: Ends 내부의 { "FIT": 0 } 형태를 { type: "FIT", val: 0 }으로 표준화
+    static parseEnds(endsData) {
+        if (!endsData) return null;
+        const parsed = {};
+        
+        // b, B, e, E 모두 허용하기 위해 키 반복 확인
+        Object.keys(endsData).forEach(key => {
+            const k = key.toLowerCase(); // b 또는 e
+            const ruleObj = endsData[key]; // { "fit": 0 } 형태
+            
+            if (ruleObj) {
+                // { "fit": 0 } 에서 키("fit")와 값(0)을 추출
+                const command = Object.keys(ruleObj)[0]; // "fit"
+                const val = ruleObj[command];            // 0
+                
+                // 내부적으로는 물리 엔진이 이해하기 쉽게 표준 포맷으로 변환하여 저장
+                // B 또는 E 키에 할당
+                parsed[k === 'b' ? 'B' : 'E'] = { 
+                    type: command.toUpperCase(), // "FIT" (대문자 강제)
+                    val: Number(val) 
+                };
+            }
+        });
+        return parsed;
+    }
+
     static create(code, center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
+        // ⚠️ 주의: 여기서 직접 호출할 땐 이미 index.html에서 정제된 값이 올 수도 있고 아닐 수도 있음.
+        // 하지만 안전하게 생성자에게 넘기기 전에는 그대로 둠.
+        // 실제로는 index.html에서 normalize해서 넘기는 게 좋지만, 
+        // 편의상 Factory.create를 호출하는 index.html 쪽 코드를 수정하는 게 낫습니다.
+        
+        // (기존 코드 유지)
         let r = null;
-        // 생성자로 모든 파라미터 전달
         if(code === 1) r = new Shape01(center, dims, rotation, angs, nors, ends);
         else if(code === 11) r = new Shape11(center, dims, rotation, angs, nors, ends);
         else if(code === 21) r = new Shape21(center, dims, rotation, angs, nors, ends);
