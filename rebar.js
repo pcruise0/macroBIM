@@ -1,10 +1,12 @@
 class RebarBase {
-    constructor(center, dims, rotation = 0, ang = null, nor = null) { 
+    // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
+    constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
         this.center = center; 
         this.dims = dims; 
         this.rotation = rotation;
-        this.ang = ang; 
-        this.nor = nor; 
+        this.angs = angs; // 복수형 s 적용
+        this.nors = nors; // 복수형 s 적용
+        this.ends = ends; // 단부 처리 규칙 (B/E) 추가
         this.segments = []; 
         this.state = "ASSEMBLING"; 
         this.debugPoints = []; 
@@ -41,13 +43,14 @@ class RebarBase {
         });
     }
 
+    // ⭐ [수정 2] ang->angs, nor->nors 로직 변경
     buildSequential(lengths, initAngle, defaultAng, defaultNor, getAnchorPos) {
-        // ⭐ 세그먼트용 키(A, B, C)와 각도용 키(RA, RB, RC)를 엄격히 분리!
         const segKeys = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
         const angKeys = ['RA', 'RB', 'RC', 'RD', 'RE', 'RF'];
 
-        let angArray = defaultAng.map((def, i) => (this.ang && this.ang[angKeys[i]] !== undefined) ? this.ang[angKeys[i]] : def);
-        let norArray = defaultNor.map((def, i) => (this.nor && this.nor[segKeys[i]] !== undefined) ? this.nor[segKeys[i]] : def);
+        // this.angs, this.nors를 우선적으로 사용하도록 변경
+        let angArray = defaultAng.map((def, i) => (this.angs && this.angs[angKeys[i]] !== undefined) ? this.angs[angKeys[i]] : def);
+        let norArray = defaultNor.map((def, i) => (this.nors && this.nors[segKeys[i]] !== undefined) ? this.nors[segKeys[i]] : def);
 
         let pts = [{x: 0, y: 0}];
         let currentAngle = initAngle;
@@ -92,13 +95,11 @@ class RebarBase {
             let corner = MathUtils.getLineIntersection(seg1.p1, seg1.p2, seg2.p1, seg2.p2);
             if (corner) { seg1.p2 = corner; seg2.p1 = corner; }
         }
-
         if (this.segments.length > 0) {
             let first = this.segments[0];
             let angF = Math.atan2(first.nodes[1].y - first.nodes[0].y, first.nodes[1].x - first.nodes[0].x);
             first.p1 = { x: first.p2.x - Math.cos(angF) * first.initialLen, y: first.p2.y - Math.sin(angF) * first.initialLen };
         }
-
         if (this.segments.length > 1) {
             let last = this.segments[this.segments.length - 1];
             let angL = Math.atan2(last.nodes[1].y - last.nodes[0].y, last.nodes[1].x - last.nodes[0].x);
@@ -107,26 +108,14 @@ class RebarBase {
     }
 }
 
-// --- [Shape 01] 1조각 직선 철근 (New) ---
+// --- Shape 클래스들은 변경 없음 (RebarBase 상속) ---
 class Shape01 extends RebarBase {
     generate() {
-        let A = this.dims.A || 1000; // Default Length
-        return this.buildSequential(
-            [A],                // 세그먼트 길이 배열: 단 하나 [A]
-            0,                  // 초기 각도: 0도 (수평)
-            [],                 // 상대 각도(ang): 관절이 없으므로 빈 배열
-            [-1],               // 디폴트 법선: -1 (아래/바깥쪽 탐색)
-            (pts) => {          // 앵커: 철근의 정중앙(Midpoint)을 기준점으로 설정
-                return { 
-                    x: (pts[0].x + pts[1].x) / 2, 
-                    y: (pts[0].y + pts[1].y) / 2 
-                };
-            }
-        );
+        let A = this.dims.A || 1000; 
+        return this.buildSequential([A], 0, [], [-1], (pts) => ({ x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }));
     }
 }
 
-// --- [Shape 11] 2조각 기본형 ---
 class Shape11 extends RebarBase {
     generate() {
         let A = this.dims.A || 400; let B = this.dims.B || 400;
@@ -134,7 +123,6 @@ class Shape11 extends RebarBase {
     }
 }
 
-// --- [Shape 21] 3조각 기본형 ---
 class Shape21 extends RebarBase {
     generate() {
         let A = this.dims.A || 400; let B = this.dims.B || 400; let C = this.dims.C || 400;
@@ -142,14 +130,10 @@ class Shape21 extends RebarBase {
     }
 }
 
-// --- [Shape 41 / 44] 5조각 기본형 ---
 class Shape41 extends RebarBase {
     generate() {
-        let A = this.dims.A || 300; 
-        let B = this.dims.B || 1000; 
-        let C = this.dims.C || 300; 
-        let D = this.dims.D || 1000; 
-        let E = this.dims.E || 300;
+        let A = this.dims.A || 300; let B = this.dims.B || 1000; 
+        let C = this.dims.C || 300; let D = this.dims.D || 1000; let E = this.dims.E || 300;
         return this.buildSequential(
             [A, B, C, D, E], 0, [-90, 90, 90, -90], [1, -1, -1, -1, 1],
             (pts) => ({ x: pts[2].x + C/2, y: pts[2].y })
@@ -157,13 +141,15 @@ class Shape41 extends RebarBase {
     }
 }
 
+// ⭐ [수정 3] Factory: angs, nors, ends 파라미터 추가
 class RebarFactory { 
-    static create(code, center, dims, rotation = 0, ang = null, nor = null) { 
+    static create(code, center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
         let r = null;
-        if(code === 1) r = new Shape01(center, dims, rotation, ang, nor);
-        else if(code === 11) r = new Shape11(center, dims, rotation, ang, nor);
-        else if(code === 21) r = new Shape21(center, dims, rotation, ang, nor);
-        else if(code === 41 || code === 44) r = new Shape41(center, dims, rotation, ang, nor);
+        // 생성자로 모든 파라미터 전달
+        if(code === 1) r = new Shape01(center, dims, rotation, angs, nors, ends);
+        else if(code === 11) r = new Shape11(center, dims, rotation, angs, nors, ends);
+        else if(code === 21) r = new Shape21(center, dims, rotation, angs, nors, ends);
+        else if(code === 41 || code === 44) r = new Shape41(center, dims, rotation, angs, nors, ends);
         return r ? r.generate() : null;
     } 
 }
