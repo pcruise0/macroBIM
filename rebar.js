@@ -107,6 +107,25 @@ class RebarBase {
     }
 }
 
+// --- [Shape 01] 1조각 직선 철근 (New) ---
+class Shape01 extends RebarBase {
+    generate() {
+        let A = this.dims.A || 1000; // Default Length
+        return this.buildSequential(
+            [A],                // 세그먼트 길이 배열: 단 하나 [A]
+            0,                  // 초기 각도: 0도 (수평)
+            [],                 // 상대 각도(ang): 관절이 없으므로 빈 배열
+            [-1],               // 디폴트 법선: -1 (아래/바깥쪽 탐색)
+            (pts) => {          // 앵커: 철근의 정중앙(Midpoint)을 기준점으로 설정
+                return { 
+                    x: (pts[0].x + pts[1].x) / 2, 
+                    y: (pts[0].y + pts[1].y) / 2 
+                };
+            }
+        );
+    }
+}
+
 // --- [Shape 11] 2조각 기본형 ---
 class Shape11 extends RebarBase {
     generate() {
