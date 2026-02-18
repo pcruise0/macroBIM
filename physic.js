@@ -1,4 +1,4 @@
-// --- 물리 엔진 (v004 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v005 - RAY/FIT Ends Support) ---
 const Physics = {
     // 1. 중력장 탐색 (기존 로직 유지)
     getGravityTarget: (px, py, segNormal, walls) => {
@@ -139,20 +139,20 @@ const Physics = {
         // 헬퍼: 벽의 양 끝점(P1, P2) 중 철근 진행 방향(uDir)상 '어느 쪽'인지 판별하여 선택
         // isForward: true면 '가장 멀리 있는 점(전진)', false면 '가장 뒤에 있는 점(후진)' 선택
         const getBestFitPoint = (seg, wall, isForward) => {
-            // 1. 벽의 두 점 (피복 적용)
             let wp1 = { x: wall.x1 + wall.nx * CONFIG.COVER, y: wall.y1 + wall.ny * CONFIG.COVER };
             let wp2 = { x: wall.x2 + wall.nx * CONFIG.COVER, y: wall.y2 + wall.ny * CONFIG.COVER };
 
-            // 2. 투영 거리 계산 (내적) - 세그먼트 시작점 기준
-            // t값이 클수록 진행 방향으로 멀리 있는 것
             let t1 = (wp1.x - seg.p1.x) * seg.uDir.x + (wp1.y - seg.p1.y) * seg.uDir.y;
             let t2 = (wp2.x - seg.p1.x) * seg.uDir.x + (wp2.y - seg.p1.y) * seg.uDir.y;
 
-            // 3. 목표에 맞는 점 선택
-            // End(E) 처리는 가장 멀리 있는 점(Max t)을, Begin(B) 처리는 가장 뒤에 있는 점(Min t)을 선택
+            // 디버깅 로그
+            console.log(`[FIT DEBUG] ${isForward ? "END" : "START"}`);
+            console.log(`Dir: (${seg.uDir.x.toFixed(2)}, ${seg.uDir.y.toFixed(2)})`);
+            console.log(`T1(P1): ${t1.toFixed(1)}, T2(P2): ${t2.toFixed(1)}`);
+            
             let targetP = (isForward ? (t1 > t2) : (t1 < t2)) ? wp1 : wp2;
+            console.log(`Selected: ${targetP === wp1 ? "P1" : "P2"}`);
 
-            // 4. 선택된 점을 철근 라인 위로 투영
             return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
         };
 
