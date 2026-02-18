@@ -136,6 +136,24 @@ const Physics = {
 applyRebarEnds: (rebar, walls) => {
         if (!rebar.ends) return;
 
+        // ⭐ [신규 추가] 만능 파서: { "fit": 0 } 형태와 { type: "FIT" } 형태 모두 처리
+        const parseEndRule = (ruleObj) => {
+            if (!ruleObj) return null;
+            
+            // 1. 표준 포맷 ({ type: "FIT", val: 0 })
+            if (ruleObj.type !== undefined) {
+                return { type: ruleObj.type.toUpperCase(), val: ruleObj.val };
+            }
+            
+            // 2. 단축 포맷 ({ "fit": 0 }) -> 첫 번째 키를 명령어로 인식
+            let keys = Object.keys(ruleObj);
+            if (keys.length > 0) {
+                let cmd = keys[0];
+                return { type: cmd.toUpperCase(), val: ruleObj[cmd] };
+            }
+            return null;
+        };
+    
         // 헬퍼: 최적점 선택 함수 (기존과 동일)
         const getBestFitPoint = (seg, wall, isForward) => {
             let wp1 = { x: wall.x1 + wall.nx * CONFIG.COVER, y: wall.y1 + wall.ny * CONFIG.COVER };
