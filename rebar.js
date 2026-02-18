@@ -199,21 +199,76 @@ class Shape13 extends RebarBase {
     }
 }
 
-// --- [Shape 21] 3마디 U자 철근 ---
+// --- [Shape 21] U형 철근 (양단 60도, 하단 밀착) ---
 class Shape21 extends RebarBase {
     generate() {
-        const {A,B,C} = this.dims; const {x,y} = this.center;
-        let p1 = { x: x - B/2, y: y + A }; 
-        let p2 = { x: x - B/2, y: y }; 
-        let p3 = { x: x + B/2, y: y }; 
-        let p4 = { x: x + B/2, y: y + C };
+        const {A, B, C} = this.dims; const {x, y} = this.center;
+        let rad = 60 * Math.PI / 180; // 바닥에서 60도
+        
+        // p1(좌측 상단) -> p2(좌측 하단) -> p3(우측 하단) -> p4(우측 상단)
+        let p2 = { x: x - B/2, y: y };
+        let p3 = { x: x + B/2, y: y };
+        let p1 = { x: p2.x - A * Math.cos(rad), y: p2.y + A * Math.sin(rad) };
+        let p4 = { x: p3.x + C * Math.cos(rad), y: p3.y + C * Math.sin(rad) };
+
+        // 선분 방향에 직각이면서 '아래쪽(바깥쪽)'을 향하는 법선 벡터
+        let nx1 = -Math.sin(rad); let ny1 = -Math.cos(rad); // 좌측 날개
+        let nx3 = Math.sin(rad);  let ny3 = -Math.cos(rad); // 우측 날개
+
         this.segments = [ 
-            this.makeSeg(p1, p2, {x:-1, y:0}, "FITTING"), 
-            this.makeSeg(p2, p3, {x:0, y:-1}, "WAITING"), 
-            this.makeSeg(p3, p4, {x:1, y:0}, "WAITING") 
+            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
+            this.makeSeg(p2, p3, {x: 0, y: -1}, "WAITING"), 
+            this.makeSeg(p3, p4, {x: nx3, y: ny3}, "WAITING") 
         ];
         this.applyRotation();
         return this;
+    }
+
+    finalize() {
+        super.finalize(); 
+        let segA = this.segments[0];
+        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
+        segA.p1 = { x: segA.p2.x - Math.cos(angleA) * segA.initialLen, y: segA.p2.y - Math.sin(angleA) * segA.initialLen };
+
+        let segC = this.segments[2];
+        let angleC = Math.atan2(segC.nodes[1].y - segC.nodes[0].y, segC.nodes[1].x - segC.nodes[0].x);
+        segC.p2 = { x: segC.p1.x + Math.cos(angleC) * segC.initialLen, y: segC.p1.y + Math.sin(angleC) * segC.initialLen };
+    }
+}
+
+// --- [Shape 25] 상향 U형 철근 (양단 60도, 상단 밀착) ---
+class Shape25 extends RebarBase {
+    generate() {
+        const {A, B, C} = this.dims; const {x, y} = this.center;
+        let rad = 60 * Math.PI / 180;
+        
+        let p2 = { x: x - B/2, y: y };
+        let p3 = { x: x + B/2, y: y };
+        let p1 = { x: p2.x - A * Math.cos(rad), y: p2.y + A * Math.sin(rad) };
+        let p4 = { x: p3.x + C * Math.cos(rad), y: p3.y + C * Math.sin(rad) };
+
+        // 21번과 반대로 '위쪽(안쪽)'을 향하는 법선 벡터 (180도 반전)
+        let nx1 = -Math.sin(rad); let ny1 = -Math.cos(rad); // 좌측 날개
+        let nx3 = Math.sin(rad);  let ny3 = -Math.cos(rad); // 우측 날개
+
+        this.segments = [ 
+            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
+            this.makeSeg(p2, p3, {x: 0, y: 1}, "WAITING"), // 가운데 구간 위쪽(1) 향함
+            this.makeSeg(p3, p4, {x: nx3, y: ny3}, "WAITING") 
+        ];
+        this.applyRotation();
+        return this;
+    }
+
+    finalize() {
+        super.finalize(); 
+        let segA = this.segments[0];
+        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
+        segA.p1 = { x: segA.p2.x - Math.cos(angleA) * segA.initialLen, y: segA.p2.y - Math.sin(angleA) * segA.initialLen };
+
+        let segC = this.segments[2];
+        let angleC = Math.atan2(segC.nodes[1].y - segC.nodes[0].y, segC.nodes[1].x - segC.nodes[0].x);
+        segC.p2 = { x: segC.p1.x + Math.cos(angleC) * segC.initialLen, y: segC.p1.y + Math.sin(angleC) * segC.initialLen };
     }
 }
 
@@ -261,6 +316,7 @@ class RebarFactory {
         else if(code === 12) r = new Shape12(center, dims, rotation); // <--- 여기 추가!
         else if(code === 13) r = new Shape13(center, dims, rotation); // <--- 여기 추가!
         else if(code === 21) r = new Shape21(center, dims, rotation);
+        else if(code === 25) r = new Shape25(center, dims, rotation);
         else if(code === 44) r = new Shape44(center, dims, rotation);
         return r ? r.generate() : null;
     } 
