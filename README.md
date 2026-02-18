@@ -17,8 +17,9 @@
 
   // 3. 단부 처리 (Begin / End, FIT / RAY 도입!)
   // fit: 벽체 끝까지 연장, ray: 철근 축방향으로 만나는 벽까지 (+ 값은 늘림, - 값은 줄임)
-  ends: {
-    B: { type: "FIT", val: 0 },   // Begin: 벽 끝에 딱 맞춤
-    E: { type: "RAY", val: -40 }  // End: 광선(Ray) 쏘고 피복만큼 후퇴
-  }
+  // ⭐ 혁신적인 Ends 입력 방식
+    Ends: { 
+        b: { "fit": 0 },    // 소문자 b, fit 가능
+        E: { "RAY": -40 }   // 대문자 E, RAY 가능 (type/val 삭제)
+    }
 }
