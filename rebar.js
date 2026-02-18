@@ -119,8 +119,11 @@ class Shape21 extends RebarBase {
 // --- [Shape 41 / 44] 5조각 기본형 ---
 class Shape41 extends RebarBase {
     generate() {
-        let A = this.dims.A || 500; let B = this.dims.B || 1800; 
-        let C = this.dims.C || 400; let D = this.dims.D || 1800; let E = this.dims.E || 500;
+        let A = this.dims.A || 300; 
+        let B = this.dims.B || 1000; 
+        let C = this.dims.C || 300; 
+        let D = this.dims.D || 1000; 
+        let E = this.dims.E || 300;
         return this.buildSequential(
             [A, B, C, D, E], 0, [-90, 90, 90, -90], [1, -1, -1, -1, 1],
             (pts) => ({ x: pts[2].x + C/2, y: pts[2].y })
