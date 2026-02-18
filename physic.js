@@ -1,4 +1,4 @@
-// --- 물리 엔진 (v005 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v006 - RAY/FIT Ends Support) ---
 const Physics = {
     // 1. 중력장 탐색 (기존 로직 유지)
     getGravityTarget: (px, py, segNormal, walls) => {
@@ -133,26 +133,20 @@ const Physics = {
     },
 
 // --- Physics.js 수정본 ---
-    applyRebarEnds: (rebar, walls) => {
+applyRebarEnds: (rebar, walls) => {
         if (!rebar.ends) return;
 
-        // 헬퍼: 벽의 양 끝점(P1, P2) 중 철근 진행 방향(uDir)상 '어느 쪽'인지 판별하여 선택
-        // isForward: true면 '가장 멀리 있는 점(전진)', false면 '가장 뒤에 있는 점(후진)' 선택
+        // 헬퍼: 최적점 선택 함수 (기존과 동일)
         const getBestFitPoint = (seg, wall, isForward) => {
             let wp1 = { x: wall.x1 + wall.nx * CONFIG.COVER, y: wall.y1 + wall.ny * CONFIG.COVER };
             let wp2 = { x: wall.x2 + wall.nx * CONFIG.COVER, y: wall.y2 + wall.ny * CONFIG.COVER };
-
             let t1 = (wp1.x - seg.p1.x) * seg.uDir.x + (wp1.y - seg.p1.y) * seg.uDir.y;
             let t2 = (wp2.x - seg.p1.x) * seg.uDir.x + (wp2.y - seg.p1.y) * seg.uDir.y;
-
-            // 디버깅 로그
-            console.log(`[FIT DEBUG] ${isForward ? "END" : "START"}`);
-            console.log(`Dir: (${seg.uDir.x.toFixed(2)}, ${seg.uDir.y.toFixed(2)})`);
-            console.log(`T1(P1): ${t1.toFixed(1)}, T2(P2): ${t2.toFixed(1)}`);
+            
+            // 디버깅 로그 (확인 완료 시 주석 처리 가능)
+            // console.log(`[FIT DEBUG] ${isForward?"END":"START"} Selected: ${(isForward?(t1>t2):(t1<t2))?"P1":"P2"} T1:${t1.toFixed(0)} T2:${t2.toFixed(0)}`);
             
             let targetP = (isForward ? (t1 > t2) : (t1 < t2)) ? wp1 : wp2;
-            console.log(`Selected: ${targetP === wp1 ? "P1" : "P2"}`);
-
             return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
         };
 
@@ -162,30 +156,21 @@ const Physics = {
             let seg = rebar.segments[0];
 
             if (type === "FIT" && seg.contactWall) {
-                // ⭐ [수정] 벽의 방향(P1->P2) 무시하고, '뒤쪽'에 있는 점 자동 선택
-                let projected = getBestFitPoint(seg, seg.contactWall, false); // false = Backward
-
-                // 최종 위치 설정 (투영점 + 방향 * val)
-                // val이 0이면 벽 끝에 딱 맞춤. val이 양수면 더 튀어나감(오류일 수 있음), 음수면 안으로 들어옴?
-                // 보통 B에서 val:0 이면 벽 끝. val:-40이면 안쪽으로?
-                // 정의: B지점은 역방향이므로, projected에서 uDir 방향으로 val만큼 이동하면
-                // val이 양수일 때 철근이 짧아짐(안쪽), 음수일 때 길어짐(바깥).
-                // 헷갈림 방지를 위해 단순 합산: StartPoint = Proj + Dir * val
-                seg.p1 = {
-                    x: projected.x + seg.uDir.x * val, 
-                    y: projected.y + seg.uDir.y * val
-                };
-            } 
-            else if (type === "RAY") { 
-                let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y }; // 역방향
+                let projected = getBestFitPoint(seg, seg.contactWall, false);
+                seg.p1 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                 
-                // 점프 로직 (내부 분절 무시)
+                // ⭐ [핵심 추가] 바뀐 길이를 '정규 길이'로 확정! (finalize 복구 방지)
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+
+            } else if (type === "RAY") { 
+                let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y };
                 const JUMP = 10;
                 let rayOrigin = { x: seg.p1.x + rayDir.x * JUMP, y: seg.p1.y + rayDir.y * JUMP };
-
                 let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
                 if (hit) {
                     seg.p1 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
+                    // ⭐ [핵심 추가]
+                    seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
                 }
             }
         }
@@ -196,24 +181,21 @@ const Physics = {
             let seg = rebar.segments[rebar.segments.length - 1];
 
             if (type === "FIT" && seg.contactWall) {
-                // ⭐ [수정] 벽의 방향 무시하고, '앞쪽'에 있는 점 자동 선택
-                let projected = getBestFitPoint(seg, seg.contactWall, true); // true = Forward
-
-                seg.p2 = {
-                    x: projected.x + seg.uDir.x * val,
-                    y: projected.y + seg.uDir.y * val
-                };
-            } 
-            else if (type === "RAY") {
-                let rayDir = seg.uDir; 
+                let projected = getBestFitPoint(seg, seg.contactWall, true);
+                seg.p2 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                 
-                // 점프 로직 (내부 분절 무시)
+                // ⭐ [핵심 추가] 바뀐 길이를 '정규 길이'로 확정!
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+
+            } else if (type === "RAY") {
+                let rayDir = seg.uDir;
                 const JUMP = 10;
                 let rayOrigin = { x: seg.p2.x + rayDir.x * JUMP, y: seg.p2.y + rayDir.y * JUMP };
-                
                 let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
                 if (hit) {
                     seg.p2 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
+                    // ⭐ [핵심 추가]
+                    seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
                 }
             }
         }
