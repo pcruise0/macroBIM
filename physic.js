@@ -1,4 +1,4 @@
-// --- 물리 엔진 (v009 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v011 - RAY/FIT Ends Support) ---
 const Physics = {
     // 1. 중력장 탐색 (기존 로직 유지)
     getGravityTarget: (px, py, segNormal, walls) => {
@@ -133,20 +133,14 @@ const Physics = {
         };
     },
 
-// --- Physics.js 수정본 ---
-applyRebarEnds: (rebar, walls) => {
+// --- Physics.js 내부 applyRebarEnds 함수 (Anchor Distance 방식) ---
+    applyRebarEnds: (rebar, walls) => {
         if (!rebar.ends) return;
 
-        // ⭐ [신규 추가] 만능 파서: { "fit": 0 } 형태와 { type: "FIT" } 형태 모두 처리
+        // 1. 만능 파서 (입력 편의성)
         const parseEndRule = (ruleObj) => {
             if (!ruleObj) return null;
-            
-            // 1. 표준 포맷 ({ type: "FIT", val: 0 })
-            if (ruleObj.type !== undefined) {
-                return { type: ruleObj.type.toUpperCase(), val: ruleObj.val };
-            }
-            
-            // 2. 단축 포맷 ({ "fit": 0 }) -> 첫 번째 키를 명령어로 인식
+            if (ruleObj.type !== undefined) return { type: ruleObj.type.toUpperCase(), val: ruleObj.val };
             let keys = Object.keys(ruleObj);
             if (keys.length > 0) {
                 let cmd = keys[0];
@@ -154,67 +148,76 @@ applyRebarEnds: (rebar, walls) => {
             }
             return null;
         };
-    
-        // 헬퍼: 최적점 선택 함수 (기존과 동일)
-        const getBestFitPoint = (seg, wall, isForward) => {
+
+        // ⭐ 2. [박사님 아이디어 적용] 기준점(Anchor)에서 가장 먼 점 찾기
+        const getFarthestWallPoint = (seg, wall, anchorPoint) => {
+            // 벽의 두 점 (피복 적용)
             let wp1 = { x: wall.x1 + wall.nx * CONFIG.COVER, y: wall.y1 + wall.ny * CONFIG.COVER };
             let wp2 = { x: wall.x2 + wall.nx * CONFIG.COVER, y: wall.y2 + wall.ny * CONFIG.COVER };
-            let t1 = (wp1.x - seg.p1.x) * seg.uDir.x + (wp1.y - seg.p1.y) * seg.uDir.y;
-            let t2 = (wp2.x - seg.p1.x) * seg.uDir.x + (wp2.y - seg.p1.y) * seg.uDir.y;
-            
-            // 디버깅 로그 (확인 완료 시 주석 처리 가능)
-            // console.log(`[FIT DEBUG] ${isForward?"END":"START"} Selected: ${(isForward?(t1>t2):(t1<t2))?"P1":"P2"} T1:${t1.toFixed(0)} T2:${t2.toFixed(0)}`);
-            
-            let targetP = (isForward ? (t1 > t2) : (t1 < t2)) ? wp1 : wp2;
+
+            // 기준점(Anchor)으로부터의 거리 제곱 계산 (sqrt 생략 최적화)
+            let d1 = (wp1.x - anchorPoint.x) ** 2 + (wp1.y - anchorPoint.y) ** 2;
+            let d2 = (wp2.x - anchorPoint.x) ** 2 + (wp2.y - anchorPoint.y) ** 2;
+
+            // 더 멀리 있는 점 선택
+            let targetP = (d1 > d2) ? wp1 : wp2;
+
+            // 선택된 점을 철근 라인 위로 투영 (직선 유지)
             return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
         };
 
-        // 1. Begin Point (B) 처리
+        // --- Begin Point (B) 처리 ---
         if (rebar.ends.B) {
-            let { type, val } = rebar.ends.B;
-            let seg = rebar.segments[0];
+            let rule = parseEndRule(rebar.ends.B);
+            if (rule) {
+                let { type, val } = rule;
+                let seg = rebar.segments[0];
 
-            if (type === "FIT" && seg.contactWall) {
-                let projected = getBestFitPoint(seg, seg.contactWall, false);
-                seg.p1 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
-                
-                // ⭐ [핵심 추가] 바뀐 길이를 '정규 길이'로 확정! (finalize 복구 방지)
-                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-
-            } else if (type === "RAY") { 
-                let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y };
-                const JUMP = 10;
-                let rayOrigin = { x: seg.p1.x + rayDir.x * JUMP, y: seg.p1.y + rayDir.y * JUMP };
-                let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
-                if (hit) {
-                    seg.p1 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
-                    // ⭐ [핵심 추가]
+                if (type === "FIT" && seg.contactWall) {
+                    // ⭐ 시작점을 바꿀 거니까, 기준점(Anchor)은 '끝점(p2)'가 됨
+                    // p2에서 가장 멀리 떨어진 벽의 점 = 벽의 시작 부분
+                    let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p2);
+                    
+                    seg.p1 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                     seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+
+                } else if (type === "RAY") { 
+                    let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y };
+                    const JUMP = 10;
+                    let rayOrigin = { x: seg.p1.x + rayDir.x * JUMP, y: seg.p1.y + rayDir.y * JUMP };
+                    let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
+                    if (hit) {
+                        seg.p1 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
+                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+                    }
                 }
             }
         }
 
-        // 2. End Point (E) 처리
+        // --- End Point (E) 처리 ---
         if (rebar.ends.E) {
-            let { type, val } = rebar.ends.E;
-            let seg = rebar.segments[rebar.segments.length - 1];
+            let rule = parseEndRule(rebar.ends.E);
+            if (rule) {
+                let { type, val } = rule;
+                let seg = rebar.segments[rebar.segments.length - 1];
 
-            if (type === "FIT" && seg.contactWall) {
-                let projected = getBestFitPoint(seg, seg.contactWall, true);
-                seg.p2 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
-                
-                // ⭐ [핵심 추가] 바뀐 길이를 '정규 길이'로 확정!
-                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+                if (type === "FIT" && seg.contactWall) {
+                    // ⭐ 끝점을 바꿀 거니까, 기준점(Anchor)은 '시작점(p1)'이 됨
+                    // p1에서 가장 멀리 떨어진 벽의 점 = 벽의 끝 부분
+                    let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p1);
 
-            } else if (type === "RAY") {
-                let rayDir = seg.uDir;
-                const JUMP = 10;
-                let rayOrigin = { x: seg.p2.x + rayDir.x * JUMP, y: seg.p2.y + rayDir.y * JUMP };
-                let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
-                if (hit) {
-                    seg.p2 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
-                    // ⭐ [핵심 추가]
+                    seg.p2 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                     seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+
+                } else if (type === "RAY") {
+                    let rayDir = seg.uDir;
+                    const JUMP = 10;
+                    let rayOrigin = { x: seg.p2.x + rayDir.x * JUMP, y: seg.p2.y + rayDir.y * JUMP };
+                    let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
+                    if (hit) {
+                        seg.p2 = { x: hit.x + rayDir.x * val, y: hit.y + rayDir.y * val };
+                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+                    }
                 }
             }
         }
