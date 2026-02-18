@@ -144,6 +144,61 @@ class Shape12 extends RebarBase {
     }
 }
 
+// --- [Shape 13] V형 철근 (내각 140도, 각 세그먼트 직각 법선 적용) ---
+class Shape13 extends RebarBase {
+    generate() {
+        const {A, B} = this.dims; const {x, y} = this.center;
+        
+        // 내각 140도를 위해 수평 기준 양쪽으로 20도씩 기울임
+        let rad = 20 * Math.PI / 180;
+        
+        // p1(좌측 상단) -> p2(V자 꼭짓점, 중앙 하단) -> p3(우측 상단)
+        let p1 = { x: x - A * Math.cos(rad), y: y + A * Math.sin(rad) };
+        let p2 = { x: x, y: y }; 
+        let p3 = { x: x + B * Math.cos(rad), y: y + B * Math.sin(rad) };
+
+        // ⭐ 각 세그먼트 방향에 '직각'이면서 아래쪽 헌치 면을 향하는 법선(Normal) 계산
+        // 1. 선분 A (p1 -> p2)의 직각 법선
+        let nx1 = -Math.sin(rad);
+        let ny1 = -Math.cos(rad);
+        
+        // 2. 선분 B (p2 -> p3)의 직각 법선
+        let nx2 = Math.sin(rad);
+        let ny2 = -Math.cos(rad);
+
+        // 계산된 직각 법선 벡터를 FITTING과 WAITING에 각각 부여
+        this.segments = [ 
+            this.makeSeg(p1, p2, {x: nx1, y: ny1}, "FITTING"), 
+            this.makeSeg(p2, p3, {x: nx2, y: ny2}, "WAITING") 
+        ];
+        this.applyRotation();
+        return this;
+    }
+
+    // ⭐ 안착 후 교점(p2)을 기준으로 원래의 길이 A, B를 정확하게 복원
+    finalize() {
+        super.finalize(); // 내부 코너(p2) 교점 우선 정리
+
+        // [A 구간 (좌측 날개)] - 꼭짓점(p2)에서 좌측 상단(p1)으로 뻗어 나감
+        let segA = this.segments[0];
+        let angleA = Math.atan2(segA.nodes[1].y - segA.nodes[0].y, segA.nodes[1].x - segA.nodes[0].x);
+        segA.p1 = {
+            x: segA.p2.x - Math.cos(angleA) * segA.initialLen,
+            y: segA.p2.y - Math.sin(angleA) * segA.initialLen
+        };
+
+        // [B 구간 (우측 날개)] - 꼭짓점(p1=p2)에서 우측 상단(p3=p2)으로 뻗어 나감
+        let segB = this.segments[1];
+        let angleB = Math.atan2(segB.nodes[1].y - segB.nodes[0].y, segB.nodes[1].x - segB.nodes[0].x);
+        segB.p2 = {
+            x: segB.p1.x + Math.cos(angleB) * segB.initialLen,
+            y: segB.p1.y + Math.sin(angleB) * segB.initialLen
+        };
+
+        console.log(`[Shape13] V형 철근 안착 완료. (내각 140도, 직각 법선 적용됨)`);
+    }
+}
+
 // --- [Shape 21] 3마디 U자 철근 ---
 class Shape21 extends RebarBase {
     generate() {
@@ -198,12 +253,13 @@ class Shape44 extends RebarBase {
     }
 }
 
-// ⭐ Factory에 Shape 12 추가
+// ⭐ Factory에 Shape 13 추가
 class RebarFactory { 
     static create(code, center, dims, rotation = 0) { 
         let r = null;
         if(code === 11) r = new Shape11(center, dims, rotation);
         else if(code === 12) r = new Shape12(center, dims, rotation); // <--- 여기 추가!
+        else if(code === 13) r = new Shape13(center, dims, rotation); // <--- 여기 추가!
         else if(code === 21) r = new Shape21(center, dims, rotation);
         else if(code === 44) r = new Shape44(center, dims, rotation);
         return r ? r.generate() : null;
