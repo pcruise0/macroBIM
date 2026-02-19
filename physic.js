@@ -1,25 +1,38 @@
-// --- 물리 엔진 (v014 - 부위별 동적 피복 런타임 적용) ---
+// --- 물리 엔진 (v015 - 완벽한 Pull-back 알고리즘 및 3중 피복 태그 연동) ---
 const Physics = {
+    // 1. 중력장 탐색 (레이저 타격 후 뒤로 당기기)
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
-        const OPPOSITE_THRESHOLD = -0.5; 
+        const OPPOSITE_THRESHOLD = 0.1; // 각도 허용치 대폭 완화 (가파른 헌치 인식용)
         
         walls.forEach(w => {
             let dot = w.nx * segNormal.x + w.ny * segNormal.y; 
             if (dot > OPPOSITE_THRESHOLD) return;
             
-            // ⭐ [핵심 복구] 박사님의 런타임 시프트 부활 + 3중 피복 태그 적용
-            let cType = w.tag ? w.tag.toLowerCase() : 'outer';
-            let coverVal = Domain.currentSection.covers[cType] || 50;
+            // 1단계: 변형되지 않은 '진짜 콘크리트 외곽선'에 레이저를 쏩니다.
+            let p1 = { x: w.x1, y: w.y1 }; 
+            let p2 = { x: w.x2, y: w.y2 };
+            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, p1, p2);
             
-            let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal }; 
-            let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
-            
-            // (무한선, 500mm 강제연장 모두 삭제. 정직한 교차판정만 수행)
-            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
             if (hit && hit.dist < minDist) { 
-                minDist = hit.dist; 
-                target = { x: hit.x, y: hit.y, wall: w }; 
+                // 2단계: 벽의 태그를 읽어 피복값(coverVal)을 가져옵니다.
+                let cType = w.tag ? w.tag.toLowerCase() : 'outer';
+                let coverVal = Domain.currentSection.covers[cType] || 50;
+
+                // 3단계: Pull-back 거리 계산 (삼각함수 원리)
+                // 레이저가 비스듬히 맞을수록 더 많이 뒤로 물러나야 수직 피복이 유지됩니다.
+                let cosTheta = (-segNormal.x * w.nx) + (-segNormal.y * w.ny);
+                
+                if (cosTheta > 0.05) { // 평행에 가까운 오류 방지
+                    let pullBackDist = coverVal / cosTheta;
+                    
+                    // 콘크리트 타격점(hit)에서 레이저 반대 방향으로 당김
+                    let tx = hit.x - segNormal.x * pullBackDist;
+                    let ty = hit.y - segNormal.y * pullBackDist;
+
+                    minDist = hit.dist; 
+                    target = { x: tx, y: ty, wall: w }; // FIT을 위해 원래 벽체 정보 저장
+                }
             }
         }); 
         return target;
@@ -103,7 +116,7 @@ const Physics = {
         };
 
         const getFarthestWallPoint = (seg, wall, anchorPoint) => {
-            // ⭐ FIT을 할 때도 동적 피복 적용
+            // FIT은 밟고 있는 벽체의 끝점만 당겨서 계산하면 안전합니다.
             let cType = wall.tag ? wall.tag.toLowerCase() : 'outer';
             let coverVal = Domain.currentSection.covers[cType] || 50;
             
@@ -156,18 +169,26 @@ const Physics = {
         }
     },
     
+    // RAY 발사 시에도 당기기(Pull-back) 알고리즘 적용
     rayCastGlobal: (origin, dir, walls) => {
         let bestHit = null; let minDist = Infinity;
         walls.forEach(w => {
-            // ⭐ 글로벌 레이캐스팅(FIT/RAY 단부처리) 시에도 동적 피복 적용
-            let cType = w.tag ? w.tag.toLowerCase() : 'outer';
-            let coverVal = Domain.currentSection.covers[cType] || 50;
-            let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal }; 
-            let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
-
-            let hit = MathUtils.rayLineIntersect(origin, dir, shiftedP1, shiftedP2);
+            let p1 = { x: w.x1, y: w.y1 }; let p2 = { x: w.x2, y: w.y2 };
+            let hit = MathUtils.rayLineIntersect(origin, dir, p1, p2);
+            
             if (hit && hit.dist < minDist && hit.dist > 0.1) { 
-                minDist = hit.dist; bestHit = hit; 
+                let cType = w.tag ? w.tag.toLowerCase() : 'outer';
+                let coverVal = Domain.currentSection.covers[cType] || 50;
+                let cosTheta = (-dir.x * w.nx) + (-dir.y * w.ny);
+
+                if (cosTheta > 0.05) {
+                    let pullBackDist = coverVal / cosTheta;
+                    minDist = hit.dist; 
+                    bestHit = {
+                        x: hit.x - dir.x * pullBackDist, 
+                        y: hit.y - dir.y * pullBackDist
+                    };
+                }
             }
         });
         return bestHit;
