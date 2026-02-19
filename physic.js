@@ -1,49 +1,37 @@
-// --- 물리 엔진 (v011 - RAY/FIT Ends Support) ---
+// --- 물리 엔진 (v012 - 초경량화/피복사전계산 연동 완료) ---
 const Physics = {
-    // 1. 중력장 탐색 (기존 로직 유지)
+    // 1. 중력장 탐색 (피복 계산 싹 제거, 순수 수학 연산만 남김)
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
         const OPPOSITE_THRESHOLD = -0.6; 
         
         walls.forEach(w => {
-            // 철근 방향과 마주보는 벽인지 확인
+            // 철근 방향과 마주보는 벽인지 확인 (허용 오차 -0.6 유지)
             let dot = w.nx * segNormal.x + w.ny * segNormal.y; 
             if (dot > OPPOSITE_THRESHOLD) return;
             
-            // 피복 두께 적용
-            let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER }; 
-            let shiftedP2 = { x: w.x2 + w.nx * CONFIG.COVER, y: w.y2 + w.ny * CONFIG.COVER };
+            // ⭐ [다이어트 완료] 피복 계산, 500mm 강제 연장 로직 전부 삭제!
+            // 이제 넘어온 walls(피복한계선)를 있는 그대로 씁니다.
+            let p1 = { x: w.x1, y: w.y1 }; 
+            let p2 = { x: w.x2, y: w.y2 };
             
-            // 벽 최소 길이 보장 로직 (500mm 미만 확장)
-            let dx = shiftedP2.x - shiftedP1.x; let dy = shiftedP2.y - shiftedP1.y;
-            let len = Math.sqrt(dx * dx + dy * dy);
-            
-            if (len > 0 && len < 500) {
-                let midX = (shiftedP1.x + shiftedP2.x) / 2;
-                let midY = (shiftedP1.y + shiftedP2.y) / 2;
-                let ux = dx / len; let uy = dy / len;
-                let halfLen = 250; 
-                shiftedP1 = { x: midX - ux * halfLen, y: midY - uy * halfLen };
-                shiftedP2 = { x: midX + ux * halfLen, y: midY + uy * halfLen };
-            }
-
             // 레이캐스팅 수행
-            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
+            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, p1, p2);
             if (hit && hit.dist < minDist) { 
                 minDist = hit.dist; 
-                target = { x: hit.x, y: hit.y, wall: w }; // ⭐ target에 wall 정보도 함께 저장 (FIT에 필요)
+                target = { x: hit.x, y: hit.y, wall: w }; // FIT에 필요한 wall 정보 저장
             }
         }); 
         return target;
     },
 
-    // 2. 물리 업데이트 루프
+    // 2. 물리 업데이트 루프 (기존 로직 완벽히 유지)
     updatePhysics: (rebar, walls) => {
         if (rebar.state === "FORMED") return;
 
         const { GRAVITY_K, DAMPING, CONVERGE } = CONFIG.PHYSICS; 
         rebar.debugPoints = []; 
-        let allSegmentsSettled = true; // 이번 프레임에 모두 안착했는지 체크용
+        let allSegmentsSettled = true;
 
         rebar.segments.forEach((seg, idx) => {
             // 순차적 안착 로직 (WAITING -> FITTING)
@@ -65,7 +53,7 @@ const Physics = {
                         validTargets++; 
                         rebar.debugPoints.push(target); 
                         
-                        // ⭐ 어떤 벽에 붙었는지 세그먼트에 기록 (FIT 기능에 필수)
+                        // 벽 감지 성공! (FIT에 필요)
                         seg.contactWall = target.wall; 
 
                         let dx = target.x - node.x; let dy = target.y - node.y;
@@ -78,7 +66,7 @@ const Physics = {
                     segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
                 });
 
-                // 안착 판정 (에너지가 낮고 위치 오차가 적으면 SETTLED)
+                // 안착 판정
                 if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { 
                     seg.state = "SETTLED"; 
                     Physics.restoreSegmentLine(seg); 
@@ -86,10 +74,9 @@ const Physics = {
             }
         });
 
-        // ⭐ [수정] 모든 세그먼트가 안착된 직후, 단부 처리(ends) 실행
-        // rebar.state가 아직 "FORMED"가 아닐 때 한 번만 실행됨
+        // 모든 세그먼트 안착 직후, 단부 처리(ends) 실행
         if (allSegmentsSettled && rebar.state !== "FORMED") { 
-            Physics.applyRebarEnds(rebar, walls); // <--- ⭐ 여기가 핵심 추가 포인트!
+            Physics.applyRebarEnds(rebar, walls); 
             
             if (rebar.finalize) rebar.finalize();
             rebar.state = "FORMED"; 
@@ -112,7 +99,6 @@ const Physics = {
             ux = seg.uDir.x; uy = seg.uDir.y; 
         }
         
-        // 방향 벡터 갱신
         seg.uDir = { x: ux, y: uy };
         
         let halfLen = seg.initialLen / 2; 
@@ -120,9 +106,8 @@ const Physics = {
         seg.p2 = { x: cx + ux * halfLen, y: cy + uy * halfLen };
     },
 
-// ⭐ 전역 헬퍼: 점 P를 직선(Origin, Dir)에 수직 투영(Projection)하는 함수
+    // 4. 전역 투영 헬퍼
     projectPointToLine: (point, lineOrigin, lineDir) => {
-        // 투영 공식: Proj = Origin + ( (Point - Origin) • Dir ) * Dir
         let dx = point.x - lineOrigin.x;
         let dy = point.y - lineOrigin.y;
         let dot = dx * lineDir.x + dy * lineDir.y;
@@ -133,11 +118,11 @@ const Physics = {
         };
     },
 
-// --- Physics.js 내부 applyRebarEnds 함수 (Anchor Distance 방식) ---
+    // 5. 단부 처리 로직 (만능 파서 포함)
     applyRebarEnds: (rebar, walls) => {
         if (!rebar.ends) return;
 
-        // 1. 만능 파서 (입력 편의성)
+        // 만능 파서 (입력 편의성)
         const parseEndRule = (ruleObj) => {
             if (!ruleObj) return null;
             if (ruleObj.type !== undefined) return { type: ruleObj.type.toUpperCase(), val: ruleObj.val };
@@ -149,20 +134,16 @@ const Physics = {
             return null;
         };
 
-        // ⭐ 2. [박사님 아이디어 적용] 기준점(Anchor)에서 가장 먼 점 찾기
+        // 기준점(Anchor)에서 가장 먼 점 찾기
         const getFarthestWallPoint = (seg, wall, anchorPoint) => {
-            // 벽의 두 점 (피복 적용)
-            let wp1 = { x: wall.x1 + wall.nx * CONFIG.COVER, y: wall.y1 + wall.ny * CONFIG.COVER };
-            let wp2 = { x: wall.x2 + wall.nx * CONFIG.COVER, y: wall.y2 + wall.ny * CONFIG.COVER };
+            // ⭐ [다이어트 완료] 피복 계산 삭제!
+            // wall의 x1, y1, x2, y2 자체가 이미 피복 한계선이므로 그대로 씁니다.
+            let d1 = (wall.x1 - anchorPoint.x) ** 2 + (wall.y1 - anchorPoint.y) ** 2;
+            let d2 = (wall.x2 - anchorPoint.x) ** 2 + (wall.y2 - anchorPoint.y) ** 2;
 
-            // 기준점(Anchor)으로부터의 거리 제곱 계산 (sqrt 생략 최적화)
-            let d1 = (wp1.x - anchorPoint.x) ** 2 + (wp1.y - anchorPoint.y) ** 2;
-            let d2 = (wp2.x - anchorPoint.x) ** 2 + (wp2.y - anchorPoint.y) ** 2;
+            let targetP = (d1 > d2) ? { x: wall.x1, y: wall.y1 } : { x: wall.x2, y: wall.y2 };
 
-            // 더 멀리 있는 점 선택
-            let targetP = (d1 > d2) ? wp1 : wp2;
-
-            // 선택된 점을 철근 라인 위로 투영 (직선 유지)
+            // 선택된 점을 철근 라인 위로 투영
             return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
         };
 
@@ -174,10 +155,7 @@ const Physics = {
                 let seg = rebar.segments[0];
 
                 if (type === "FIT" && seg.contactWall) {
-                    // ⭐ 시작점을 바꿀 거니까, 기준점(Anchor)은 '끝점(p2)'가 됨
-                    // p2에서 가장 멀리 떨어진 벽의 점 = 벽의 시작 부분
                     let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p2);
-                    
                     seg.p1 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                     seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
 
@@ -202,10 +180,7 @@ const Physics = {
                 let seg = rebar.segments[rebar.segments.length - 1];
 
                 if (type === "FIT" && seg.contactWall) {
-                    // ⭐ 끝점을 바꿀 거니까, 기준점(Anchor)은 '시작점(p1)'이 됨
-                    // p1에서 가장 멀리 떨어진 벽의 점 = 벽의 끝 부분
                     let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p1);
-
                     seg.p2 = { x: projected.x + seg.uDir.x * val, y: projected.y + seg.uDir.y * val };
                     seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
 
@@ -223,21 +198,15 @@ const Physics = {
         }
     },
     
-    // ⭐ 5. [신규 추가] 전역 레이캐스팅 헬퍼
+    // 6. 전역 레이캐스팅 헬퍼
     rayCastGlobal: (origin, dir, walls) => {
         let bestHit = null;
         let minDist = Infinity;
         
-        // 충분히 긴 거리로 설정 (화면 전체 커버)
-        let farPoint = { x: origin.x + dir.x * 100000, y: origin.y + dir.y * 100000 };
-
         walls.forEach(w => {
-            // 벽의 피복 적용된 좌표 계산 (일관성 유지)
-            let shiftedP1 = { x: w.x1 + w.nx * CONFIG.COVER, y: w.y1 + w.ny * CONFIG.COVER };
-            let shiftedP2 = { x: w.x2 + w.nx * CONFIG.COVER, y: w.y2 + w.ny * CONFIG.COVER };
-
-            let hit = MathUtils.rayLineIntersect(origin, dir, shiftedP1, shiftedP2);
-            if (hit && hit.dist < minDist && hit.dist > 0.1) { // 0.1은 자기 자신 벽 제외용 오차
+            // ⭐ [다이어트 완료] 피복 계산 삭제!
+            let hit = MathUtils.rayLineIntersect(origin, dir, {x: w.x1, y: w.y1}, {x: w.x2, y: w.y2});
+            if (hit && hit.dist < minDist && hit.dist > 0.1) { 
                 minDist = hit.dist;
                 bestHit = hit;
             }
