@@ -1,15 +1,12 @@
     // =========================================================================
-    //  2. DATA CLASSES   v01
+    //  2. DATA CLASSES   v02
     // =========================================================================
-    class SectionBase {
+class SectionBase {
         constructor(cx, cy, params) { 
-            this.cx = cx; 
-            this.cy = cy; 
-            this.params = params; 
-            this.walls = []; 
-            this.displayPaths = []; 
+            this.cx = cx; this.cy = cy; this.params = params; 
+            this.walls = []; this.displayPaths = []; 
             
-            // ⭐ [추가] 오프셋 벽체를 담을 배열과 피복 기본값
+            // ⭐ [추가] 오프셋된 피복 한계선을 담을 전용 배열
             this.coverWalls = []; 
             this.covers = { top: 50, outer: 50, inner: 50 }; 
         }
@@ -21,6 +18,7 @@
         }
 
         makeCorner(pPrev, pCurr, pNext, spec) {
+            // (기존 곡선, 챔퍼 처리 로직 동일)
             if (spec.type === 'N') return { points: [] };
             let v1 = {x: pCurr.x-pPrev.x, y: pCurr.y-pPrev.y}, v2 = {x: pNext.x-pCurr.x, y: pNext.y-pCurr.y};
             let len1 = MathUtils.hypot(v1.x, v1.y); let u1 = {x:v1.x/len1, y:v1.y/len1};
@@ -41,28 +39,44 @@
             }
             return { tS: 0, tE: 0, points: [] };
         }
+
+        // ⭐ [신규 수학 함수] 두 직선의 교차점을 구하는 함수
+        intersectLines(p1, p2, p3, p4) {
+            let denom = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+            if (Math.abs(denom) < 1e-6) return null; // 평행할 경우
+            let t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / denom;
+            return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+        }
         
         buildFromPaths(pathArray) {
-            this.displayPaths = []; this.walls = [];
+            this.displayPaths = []; this.walls = []; 
+            this.coverWalls = []; // ⭐ 초기화
+
             pathArray.forEach(pathData => {
                 let nodes = pathData.nodes; let specs = pathData.specs;
                 let trims = nodes.map((_, i) => {
                     let prev = nodes[(i - 1 + nodes.length) % nodes.length]; let next = nodes[(i + 1) % nodes.length];
                     return this.makeCorner(prev, nodes[i], next, specs[i]);
                 });
+                
                 let currentDisplayPath = [];
+                let loopWalls = []; // ⭐ 현재 폴리곤의 외곽 벽체들을 임시 저장
+
                 for (let i = 0; i < nodes.length; i++) {
                     let next = (i + 1) % nodes.length;
                     let p1 = nodes[i], p2 = nodes[next];
                     let tS = trims[i].tE || 0, tE = trims[next].tS || 0;
                     let dx = p2.x - p1.x, dy = p2.y - p1.y, len = MathUtils.hypot(dx, dy);
+                    
                     if (len > tS + tE + 0.1) {
                         let ux = dx / len, uy = dy / len;
                         let start = { x: p1.x + ux * tS, y: p1.y + uy * tS }; let end = { x: p2.x - ux * tE, y: p2.y - uy * tE };
                         
-                        // ⭐ [추가] 생성되는 벽체에 TAG 꼬리표 부착 (기본값 OUTER)
                         let wallTag = specs[i].tag || 'OUTER';
-                        this.walls.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux, tag: wallTag });
+                        let newWall = { x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux, tag: wallTag };
+                        
+                        this.walls.push(newWall);
+                        loopWalls.push(newWall); // 오프셋 계산을 위해 저장
                         
                         if (currentDisplayPath.length === 0) currentDisplayPath.push(start); else currentDisplayPath.push(start);
                         currentDisplayPath.push(end);
@@ -71,6 +85,46 @@
                 }
                 if(currentDisplayPath.length > 0) currentDisplayPath.push(currentDisplayPath[0]);
                 this.displayPaths.push(currentDisplayPath);
+
+                // =========================================================
+                // ⭐ [핵심 추가] 피복 한계선(Cover Walls) 폴리곤 자동 생성
+                // =========================================================
+                if (loopWalls.length > 2) {
+                    let offsetLines = [];
+                    // 1. 각 선분을 태그에 맞는 두께(coverVal)만큼 평행 이동
+                    for (let i = 0; i < loopWalls.length; i++) {
+                        let w = loopWalls[i];
+                        let cType = w.tag.toLowerCase(); // 'top', 'outer', 'inner'
+                        let coverVal = this.covers[cType] !== undefined ? this.covers[cType] : 50;
+                        
+                        // 법선(nx,ny) 방향으로 피복만큼 밀어냄 (안쪽으로 축소)
+                        let p1_off = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal };
+                        let p2_off = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
+                        offsetLines.push({ p1: p1_off, p2: p2_off, nx: w.nx, ny: w.ny, tag: w.tag });
+                    }
+
+                    // 2. 이동된 선분들의 교차점(새로운 꼭짓점) 계산
+                    let coverVertices = [];
+                    for (let i = 0; i < offsetLines.length; i++) {
+                        let curr = offsetLines[i];
+                        let next = offsetLines[(i + 1) % offsetLines.length];
+                        let intersect = this.intersectLines(curr.p1, curr.p2, next.p1, next.p2);
+                        coverVertices.push(intersect ? intersect : curr.p2); // 평행하면 끝점 사용
+                    }
+
+                    // 3. 교차점들을 이어 완벽한 피복 전용 벽체(coverWalls) 생성
+                    for (let i = 0; i < offsetLines.length; i++) {
+                        let pStart = coverVertices[(i - 1 + offsetLines.length) % offsetLines.length];
+                        let pEnd = coverVertices[i];
+                        let line = offsetLines[i];
+                        
+                        this.coverWalls.push({
+                            x1: pStart.x, y1: pStart.y, 
+                            x2: pEnd.x, y2: pEnd.y, 
+                            nx: line.nx, ny: line.ny, tag: line.tag
+                        });
+                    }
+                }
             });
         }
     }
