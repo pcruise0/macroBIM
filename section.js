@@ -1,10 +1,25 @@
-
     // =========================================================================
-    //  2. DATA CLASSES 
+    //  2. DATA CLASSES   v01
     // =========================================================================
     class SectionBase {
-        constructor(cx, cy, params) { this.cx = cx; this.cy = cy; this.params = params; this.walls = []; this.displayPaths = []; }
-        parseCorner(str) { if (!str) return { type: 'N' }; let v = parseFloat(str.substring(1)); return str.startsWith('F') ? { type: 'F', r: v } : { type: 'C', x: v, y: v }; }
+        constructor(cx, cy, params) { 
+            this.cx = cx; 
+            this.cy = cy; 
+            this.params = params; 
+            this.walls = []; 
+            this.displayPaths = []; 
+            
+            // ⭐ [추가] 오프셋 벽체를 담을 배열과 피복 기본값
+            this.coverWalls = []; 
+            this.covers = { top: 50, outer: 50, inner: 50 }; 
+        }
+
+        parseCorner(str) { 
+            if (!str) return { type: 'N' }; 
+            let v = parseFloat(str.substring(1)); 
+            return str.startsWith('F') ? { type: 'F', r: v } : { type: 'C', x: v, y: v }; 
+        }
+
         makeCorner(pPrev, pCurr, pNext, spec) {
             if (spec.type === 'N') return { points: [] };
             let v1 = {x: pCurr.x-pPrev.x, y: pCurr.y-pPrev.y}, v2 = {x: pNext.x-pCurr.x, y: pNext.y-pCurr.y};
@@ -44,7 +59,11 @@
                     if (len > tS + tE + 0.1) {
                         let ux = dx / len, uy = dy / len;
                         let start = { x: p1.x + ux * tS, y: p1.y + uy * tS }; let end = { x: p2.x - ux * tE, y: p2.y - uy * tE };
-                        this.walls.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux });
+                        
+                        // ⭐ [추가] 생성되는 벽체에 TAG 꼬리표 부착 (기본값 OUTER)
+                        let wallTag = specs[i].tag || 'OUTER';
+                        this.walls.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux, tag: wallTag });
+                        
                         if (currentDisplayPath.length === 0) currentDisplayPath.push(start); else currentDisplayPath.push(start);
                         currentDisplayPath.push(end);
                     }
@@ -65,11 +84,14 @@
             raw.forEach(p => { p.x += this.cx; p.y += this.cy; });
             const parse = (s) => this.parseCorner(s);
             let specs = [ parse(corners.TT), parse(corners.TT), {type:'N'}, parse(corners.TH), parse(corners.BT), parse(corners.BT), parse(corners.TH), {type:'N'} ];
+            
+            // ⭐ TBeam 상단 슬래브에 TOP 태그 부착 
+            specs[0].tag = 'TOP'; // 첫번째 선분(상단)
             this.buildFromPaths([{ nodes: raw, specs: specs }]);
         }
     }
 
-class BoxGirder extends SectionBase {
+    class BoxGirder extends SectionBase {
         constructor(cx, cy, params) {
             super(cx, cy, params);
             this.parsedData = null; 
@@ -90,7 +112,14 @@ class BoxGirder extends SectionBase {
                     const item = rawArray[i];
                     const key = item[0]; 
                     
-                    if (key === "BOX") {
+                    // ⭐ [추가] COVER 파싱 추가
+                    if (key === "COVER") {
+                        data[key] = {
+                            top: parseFloat(item[1]),
+                            outer: parseFloat(item[2]),
+                            inner: parseFloat(item[3])
+                        };
+                    } else if (key === "BOX") {
                         data[key] = { HT: item[1], WTL: item[2], WTR: item[3], WBL: item[4], SBR: item[5], SLL: item[6], SLR: item[7] };
                     } else if (key === "WP" || key === "WB") {
                         data[key] = item.slice(1);
@@ -124,6 +153,12 @@ class BoxGirder extends SectionBase {
             if (this.parsedData) {
                 const data = this.parsedData;
                 
+                // ⭐ [추가] 파싱된 피복 데이터가 있다면 BoxGirder 객체에 저장
+                if (data.COVER) {
+                    this.covers = data.COVER;
+                    console.log("✅ 피복 데이터 로드 완료:", this.covers);
+                }
+                
                 const { HT, WTL, WTR, WBL, SBR, SLL, SLR } = data.BOX;
                 const WBR = SBR; 
 
@@ -136,8 +171,6 @@ class BoxGirder extends SectionBase {
                 // 1. 외부 노드 (outerNodes) 계산
                 // =========================================================
                 let ptc = {x: 0, y: 0};
-                
-                // ⭐ 수학적 기울기 y = x * (Slope / 100) 적용 (절댓값 족쇄 제거)
                 let plc = {x: -WTL, y: -WTL * (SLL / 100)};
                 let plcb = {x: plc.x, y: plc.y - csLeft[csLeft.length - 1]};
                 let plwt = {x: webPos[0], y: webPos[0] * (SLL / 100) - csLeft[1]};
@@ -155,7 +188,6 @@ class BoxGirder extends SectionBase {
                 let plb = {x: -WBL, y: pcb.y};
                 let prb = {x: WBR, y: pcb.y};
                 
-                // ⭐ 우측도 순수 수학 공식 적용 (x가 양수이므로 SLR이 -면 자동으로 하강)
                 let prwt = {x: webPos[webPos.length - 1], y: webPos[webPos.length - 1] * (SLR / 100) - csRight[1]};
                 
                 let rightHaunches = [];
@@ -200,7 +232,6 @@ class BoxGirder extends SectionBase {
                     let inR_p1 = {x: in_R_web.x1, y: in_R_web.y1};
                     let inR_p2 = {x: in_R_web.x2, y: in_R_web.y2};
 
-                    // ⭐ 내부 셀 상부 헌치도 순수 수학 공식 적용
                     let tsL_line_p1 = { x: 0, y: -tsL[1] };
                     let tsL_line_p2 = { x: -10000, y: -10000 * (SLL / 100) - tsL[1] };
                     let p_tsL_root = geo_intersect(inL_p1, inL_p2, tsL_line_p1, tsL_line_p2);
@@ -237,8 +268,20 @@ class BoxGirder extends SectionBase {
             innerNodes.forEach(cell => { cell.forEach(p => { p.x += this.cx; p.y += this.cy; }); });
 
             let pathsToBuild = [];
-            pathsToBuild.push({ nodes: outerNodes, specs: outerNodes.map(()=>({type:'N'})) });
-            innerNodes.forEach(cell => { pathsToBuild.push({ nodes: cell, specs: cell.map(()=>({type:'N'})) }); });
+            
+            // ⭐ [추가] 외부 노드에 TAG (TOP vs OUTER) 부착
+            // 0번째 구간(중앙~좌상단), 마지막 구간(우상단~중앙)은 TOP. 나머지는 OUTER
+            let outerSpecs = outerNodes.map((_, i) => {
+                if (i === 0 || i === outerNodes.length - 1) return { type: 'N', tag: 'TOP' };
+                return { type: 'N', tag: 'OUTER' };
+            });
+            pathsToBuild.push({ nodes: outerNodes, specs: outerSpecs });
+
+            // ⭐ [추가] 내부 셀 노드에 TAG (INNER) 부착
+            innerNodes.forEach(cell => { 
+                let innerSpecs = cell.map(() => ({ type: 'N', tag: 'INNER' }));
+                pathsToBuild.push({ nodes: cell, specs: innerSpecs }); 
+            });
 
             this.buildFromPaths(pathsToBuild);
         }
