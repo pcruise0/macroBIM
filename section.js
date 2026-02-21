@@ -1,8 +1,5 @@
     // =========================================================================
-    //  2. DATA CLASSES   v03
-    // =========================================================================
-// =========================================================================
-    //  2. DATA CLASSES (SectionBase 롤백 및 태그 유지)
+    //  2. DATA CLASSES (SectionBase 롤백, 태그 및 ID 유지)  v04
     // =========================================================================
     class SectionBase {
         constructor(cx, cy, params) { 
@@ -57,9 +54,10 @@
                         let ux = dx / len, uy = dy / len;
                         let start = { x: p1.x + ux * tS, y: p1.y + uy * tS }; let end = { x: p2.x - ux * tE, y: p2.y - uy * tE };
                         
-                        // ⭐ 벽체에 태그 유지
+                        // ⭐ [추가] 벽체에 태그와 고유 ID 유지
                         let wallTag = specs[i].tag || 'OUTER';
-                        this.walls.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux, tag: wallTag });
+                        let wallId = specs[i].id || 'W_UNK'; 
+                        this.walls.push({ id: wallId, x1: start.x, y1: start.y, x2: end.x, y2: end.y, nx: -uy, ny: ux, tag: wallTag });
                         
                         if (currentDisplayPath.length === 0) currentDisplayPath.push(start); else currentDisplayPath.push(start);
                         currentDisplayPath.push(end);
@@ -82,8 +80,8 @@
             const parse = (s) => this.parseCorner(s);
             let specs = [ parse(corners.TT), parse(corners.TT), {type:'N'}, parse(corners.TH), parse(corners.BT), parse(corners.BT), parse(corners.TH), {type:'N'} ];
             
-            // ⭐ TBeam 상단 슬래브에 TOP 태그 부착 
-            specs[0].tag = 'TOP'; // 첫번째 선분(상단)
+            // ⭐ TBeam ID 부여
+            specs.forEach((s, i) => { s.tag = (i === 0) ? 'TOP' : 'OUTER'; s.id = 'E' + (i + 1); });
             this.buildFromPaths([{ nodes: raw, specs: specs }]);
         }
     }
@@ -95,27 +93,19 @@
         }
 
         parsePscBox(inputString) {
+            // ... (기존 파싱 로직 동일) ...
             try {
                 let jsonStr = inputString.replace(/\{/g, '[').replace(/\}/g, ']');
                 jsonStr = jsonStr.replace(/([a-zA-Z]+)/g, '"$1"');
                 const rawArray = JSON.parse(jsonStr);
-                
                 if (rawArray[0] !== "PSCBOX") throw new Error("PSCBOX 형식이 아닙니다.");
-                
                 const sectionId = rawArray[1];
                 const data = { id: sectionId };
-                
                 for (let i = 2; i < rawArray.length; i++) {
                     const item = rawArray[i];
                     const key = item[0]; 
-                    
-                    // ⭐ [추가] COVER 파싱 추가
                     if (key === "COVER") {
-                        data[key] = {
-                            top: parseFloat(item[1]),
-                            outer: parseFloat(item[2]),
-                            inner: parseFloat(item[3])
-                        };
+                        data[key] = { top: parseFloat(item[1]), outer: parseFloat(item[2]), inner: parseFloat(item[3]) };
                     } else if (key === "BOX") {
                         data[key] = { HT: item[1], WTL: item[2], WTR: item[3], WBL: item[4], SBR: item[5], SLL: item[6], SLR: item[7] };
                     } else if (key === "WP" || key === "WB") {
@@ -138,19 +128,12 @@
             }
         }
 
-        // 2. 단면을 생성하는 메인 로직
         generate(inputString) {
-            if (inputString) {
-                this.parsePscBox(inputString);
-            }
-
-            let outerNodes = [];
-            let innerNodes = []; 
+            if (inputString) this.parsePscBox(inputString);
+            let outerNodes = []; let innerNodes = []; 
 
             if (this.parsedData) {
                 const data = this.parsedData;
-                
-                // ⭐ [추가] 파싱된 피복 데이터가 있다면 BoxGirder 객체에 저장
                 if (data.COVER) {
                     this.covers = data.COVER;
                     console.log("✅ 피복 데이터 로드 완료:", this.covers);
@@ -158,22 +141,18 @@
                 
                 const { HT, WTL, WTR, WBL, SBR, SLL, SLR } = data.BOX;
                 const WBR = SBR; 
-
                 const csLeft = data.CS ? data.CS.L : [];   
                 const csRight = data.CS ? data.CS.R : [];  
                 const webThick = data.WB || [];
                 const webPos = data.WP || [];   
                 
-                // =========================================================
-                // 1. 외부 노드 (outerNodes) 계산
-                // =========================================================
+                // --- 1. 외부 노드 계산 ---
                 let ptc = {x: 0, y: 0};
                 let plc = {x: -WTL, y: -WTL * (SLL / 100)};
                 let plcb = {x: plc.x, y: plc.y - csLeft[csLeft.length - 1]};
                 let plwt = {x: webPos[0], y: webPos[0] * (SLL / 100) - csLeft[1]};
                 
-                let leftHaunches = [];
-                let accLeftDist = 0; 
+                let leftHaunches = []; let accLeftDist = 0; 
                 for (let i = 1; i < csLeft.length / 2; i++) {
                     accLeftDist += csLeft[i * 2]; 
                     let hx = webPos[0] - accLeftDist; 
@@ -184,11 +163,9 @@
                 let pcb = {x: 0, y: -HT};
                 let plb = {x: -WBL, y: pcb.y};
                 let prb = {x: WBR, y: pcb.y};
-                
                 let prwt = {x: webPos[webPos.length - 1], y: webPos[webPos.length - 1] * (SLR / 100) - csRight[1]};
                 
-                let rightHaunches = [];
-                let accRightDist = 0; 
+                let rightHaunches = []; let accRightDist = 0; 
                 for (let i = 1; i < csRight.length / 2; i++) {
                     accRightDist += csRight[i * 2]; 
                     let hx = webPos[webPos.length - 1] + accRightDist; 
@@ -199,84 +176,61 @@
                 let prc = {x: WTR, y: WTR * (SLR / 100)};
                 let prcb = {x: prc.x, y: prc.y - csRight[csRight.length - 1]};                
                 
-                outerNodes = [
-                    ptc, plc, plcb,
-                    ...leftHaunches.reverse(),
-                    plwt, plb, pcb, prb, prwt,
-                    ...rightHaunches,
-                    prcb, prc
-                ];
+                outerNodes = [ ptc, plc, plcb, ...leftHaunches.reverse(), plwt, plb, pcb, prb, prwt, ...rightHaunches, prcb, prc ];
 
-                // =========================================================
-                // 2. 내부 셀 (innerNodes) 계산
-                // =========================================================
+                // --- 2. 내부 셀 계산 ---
                 const tsCells = data.TS || {}; 
                 const bsCells = data.BS || {}; 
                 
                 for (let cellId in tsCells) {
                     let cellIndex = parseInt(cellId) - 1; 
-
-                    let tsL = tsCells[cellId][0]; 
-                    let tsR = tsCells[cellId][1]; 
+                    let tsL = tsCells[cellId][0]; let tsR = tsCells[cellId][1]; 
                     let bsL = bsCells[cellId] ? bsCells[cellId][0] : [0, 0, 0, 0];
                     let bsR = bsCells[cellId] ? bsCells[cellId][1] : [0, 0, 0, 0];
 
                     let in_L_web = geo_offset(plwt, plb, webThick[0]);
-                    let inL_p1 = {x: in_L_web.x1, y: in_L_web.y1};
-                    let inL_p2 = {x: in_L_web.x2, y: in_L_web.y2};
+                    let inL_p1 = {x: in_L_web.x1, y: in_L_web.y1}; let inL_p2 = {x: in_L_web.x2, y: in_L_web.y2};
 
                     let in_R_web = geo_offset(prwt, prb, webThick[1]);
-                    let inR_p1 = {x: in_R_web.x1, y: in_R_web.y1};
-                    let inR_p2 = {x: in_R_web.x2, y: in_R_web.y2};
+                    let inR_p1 = {x: in_R_web.x1, y: in_R_web.y1}; let inR_p2 = {x: in_R_web.x2, y: in_R_web.y2};
 
-                    let tsL_line_p1 = { x: 0, y: -tsL[1] };
-                    let tsL_line_p2 = { x: -10000, y: -10000 * (SLL / 100) - tsL[1] };
+                    let tsL_line_p1 = { x: 0, y: -tsL[1] }; let tsL_line_p2 = { x: -10000, y: -10000 * (SLL / 100) - tsL[1] };
                     let p_tsL_root = geo_intersect(inL_p1, inL_p2, tsL_line_p1, tsL_line_p2);
                     let tipL_x = p_tsL_root.x + tsL[2]; 
                     let p_tsL_tip = { x: tipL_x, y: tipL_x * (SLL / 100) - tsL[3] };
 
-                    let tsR_line_p1 = { x: 0, y: -tsR[1] };
-                    let tsR_line_p2 = { x: 10000, y: 10000 * (SLR / 100) - tsR[1] };
+                    let tsR_line_p1 = { x: 0, y: -tsR[1] }; let tsR_line_p2 = { x: 10000, y: 10000 * (SLR / 100) - tsR[1] };
                     let p_tsR_root = geo_intersect(inR_p1, inR_p2, tsR_line_p1, tsR_line_p2);
                     let tipR_x = p_tsR_root.x - tsR[2];
                     let p_tsR_tip = { x: tipR_x, y: tipR_x * (SLR / 100) - tsR[3] };
 
-                    let bsL_line_p1 = { x: 0, y: -HT + bsL[1] };
-                    let bsL_line_p2 = { x: -10000, y: -HT + bsL[1] };
+                    let bsL_line_p1 = { x: 0, y: -HT + bsL[1] }; let bsL_line_p2 = { x: -10000, y: -HT + bsL[1] };
                     let p_bsL_root = geo_intersect(inL_p1, inL_p2, bsL_line_p1, bsL_line_p2);
                     let p_bsL_tip = { x: p_bsL_root.x + bsL[2], y: -HT + bsL[3] };
 
-                    let bsR_line_p1 = { x: 0, y: -HT + bsR[1] };
-                    let bsR_line_p2 = { x: 10000, y: -HT + bsR[1] };
+                    let bsR_line_p1 = { x: 0, y: -HT + bsR[1] }; let bsR_line_p2 = { x: 10000, y: -HT + bsR[1] };
                     let p_bsR_root = geo_intersect(inR_p1, inR_p2, bsR_line_p1, bsR_line_p2);
                     let p_bsR_tip = { x: p_bsR_root.x - bsR[2], y: -HT + bsR[3] };
 
-                    innerNodes[cellIndex] = [
-                        p_tsL_root, p_tsL_tip, p_tsR_tip, p_tsR_root,
-                        p_bsR_root, p_bsR_tip, p_bsL_tip, p_bsL_root
-                    ];
+                    innerNodes[cellIndex] = [ p_tsL_root, p_tsL_tip, p_tsR_tip, p_tsR_root, p_bsR_root, p_bsR_tip, p_bsL_tip, p_bsL_root ];
                 }
             }
 
-            // =========================================================
-            // 3. 렌더링을 위한 좌표 변환 및 Path 조립
-            // =========================================================
             outerNodes.forEach(p => { p.x += this.cx; p.y += this.cy; });
             innerNodes.forEach(cell => { cell.forEach(p => { p.x += this.cx; p.y += this.cy; }); });
 
             let pathsToBuild = [];
             
-            // ⭐ [추가] 외부 노드에 TAG (TOP vs OUTER) 부착
-            // 0번째 구간(중앙~좌상단), 마지막 구간(우상단~중앙)은 TOP. 나머지는 OUTER
+            // ⭐ [추가] 외부 노드 ID 자동 부여 (E1, E2...)
             let outerSpecs = outerNodes.map((_, i) => {
-                if (i === 0 || i === outerNodes.length - 1) return { type: 'N', tag: 'TOP' };
-                return { type: 'N', tag: 'OUTER' };
+                let tag = (i === 0 || i === outerNodes.length - 1) ? 'TOP' : 'OUTER';
+                return { type: 'N', tag: tag, id: 'E' + (i + 1) };
             });
             pathsToBuild.push({ nodes: outerNodes, specs: outerSpecs });
 
-            // ⭐ [추가] 내부 셀 노드에 TAG (INNER) 부착
-            innerNodes.forEach(cell => { 
-                let innerSpecs = cell.map(() => ({ type: 'N', tag: 'INNER' }));
+            // ⭐ [추가] 내부 셀 노드 ID 자동 부여 (C1_1, C1_2...)
+            innerNodes.forEach((cell, cellIndex) => { 
+                let innerSpecs = cell.map((_, i) => ({ type: 'N', tag: 'INNER', id: `C${cellIndex + 1}_${i + 1}` }));
                 pathsToBuild.push({ nodes: cell, specs: innerSpecs }); 
             });
 
