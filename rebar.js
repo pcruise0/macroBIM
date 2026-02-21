@@ -3,7 +3,8 @@ class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
         this.center = center; 
-        this.dims = dims; 
+        // 💥 [핵심 수정] dims가 undefined면 빈 객체({})를 넣어줍니다!
+        this.dims = dims || {};
         this.rotation = rotation;
         this.angs = angs; // 복수형 s 적용
         this.nors = nors; // 복수형 s 적용
