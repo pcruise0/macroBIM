@@ -1,23 +1,21 @@
-// --- 물리 엔진 (박사님 오리지널 로직 복원 + 동적 피복 연동) ---
+// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) ---
 const Physics = {
-    // 1. 중력장 탐색 (박사님의 안전한 500mm 보정 로직 부활)
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
-        const OPPOSITE_THRESHOLD = -0.6; // 박사님의 원래 각도 허용치 복구
+        const OPPOSITE_THRESHOLD = -0.6; // ⭐ 박사님의 원래 안전한 허용치 복구
         
         walls.forEach(w => {
             let dot = w.nx * segNormal.x + w.ny * segNormal.y; 
             if (dot > OPPOSITE_THRESHOLD) return;
             
-            // ⭐ [추가] 박사님의 원래 코드에 동적 피복(Tag)만 살짝 입힙니다.
+            // ⭐ 피복 두께만 Tag를 읽어서 다르게 적용
             let cType = w.tag ? w.tag.toLowerCase() : 'outer';
             let coverVal = Domain.currentSection.covers[cType] || 50;
 
             let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal }; 
             let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
             
-            // ⭐ [복구] 박사님의 위대한 '짧은 벽 안전 보정' 로직 부활!
-            // (10미터 무한 연장 같은 멍청한 짓은 삭제했습니다)
+            // ⭐ [오리지널 로직 부활] 박사님이 짜두셨던 500mm 짧은벽 안전 보정!
             let dx = shiftedP2.x - shiftedP1.x; let dy = shiftedP2.y - shiftedP1.y;
             let len = Math.sqrt(dx * dx + dy * dy);
             
