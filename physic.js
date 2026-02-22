@@ -1,38 +1,39 @@
-// --- 물리 엔진 (v015 - 완벽한 Pull-back 알고리즘 및 3중 피복 태그 연동) ---
+// --- 물리 엔진 (박사님 오리지널 로직 복원 + 동적 피복 연동) ---
 const Physics = {
-    // 1. 중력장 탐색 (레이저 타격 후 뒤로 당기기)
+    // 1. 중력장 탐색 (박사님의 안전한 500mm 보정 로직 부활)
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
-        const OPPOSITE_THRESHOLD = 0.1; // 각도 허용치 대폭 완화 (가파른 헌치 인식용)
+        const OPPOSITE_THRESHOLD = -0.6; // 박사님의 원래 각도 허용치 복구
         
         walls.forEach(w => {
             let dot = w.nx * segNormal.x + w.ny * segNormal.y; 
             if (dot > OPPOSITE_THRESHOLD) return;
             
-            // 1단계: 변형되지 않은 '진짜 콘크리트 외곽선'에 레이저를 쏩니다.
-            let p1 = { x: w.x1, y: w.y1 }; 
-            let p2 = { x: w.x2, y: w.y2 };
-            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, p1, p2);
+            // ⭐ [추가] 박사님의 원래 코드에 동적 피복(Tag)만 살짝 입힙니다.
+            let cType = w.tag ? w.tag.toLowerCase() : 'outer';
+            let coverVal = Domain.currentSection.covers[cType] || 50;
+
+            let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal }; 
+            let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
             
+            // ⭐ [복구] 박사님의 위대한 '짧은 벽 안전 보정' 로직 부활!
+            // (10미터 무한 연장 같은 멍청한 짓은 삭제했습니다)
+            let dx = shiftedP2.x - shiftedP1.x; let dy = shiftedP2.y - shiftedP1.y;
+            let len = Math.sqrt(dx * dx + dy * dy);
+            
+            if (len > 0 && len < 500) {
+                let midX = (shiftedP1.x + shiftedP2.x) / 2;
+                let midY = (shiftedP1.y + shiftedP2.y) / 2;
+                let ux = dx / len; let uy = dy / len;
+                let halfLen = 250; 
+                shiftedP1 = { x: midX - ux * halfLen, y: midY - uy * halfLen };
+                shiftedP2 = { x: midX + ux * halfLen, y: midY + uy * halfLen };
+            }
+
+            let hit = MathUtils.rayLineIntersect({x: px, y: py}, segNormal, shiftedP1, shiftedP2);
             if (hit && hit.dist < minDist) { 
-                // 2단계: 벽의 태그를 읽어 피복값(coverVal)을 가져옵니다.
-                let cType = w.tag ? w.tag.toLowerCase() : 'outer';
-                let coverVal = Domain.currentSection.covers[cType] || 50;
-
-                // 3단계: Pull-back 거리 계산 (삼각함수 원리)
-                // 레이저가 비스듬히 맞을수록 더 많이 뒤로 물러나야 수직 피복이 유지됩니다.
-                let cosTheta = (-segNormal.x * w.nx) + (-segNormal.y * w.ny);
-                
-                if (cosTheta > 0.05) { // 평행에 가까운 오류 방지
-                    let pullBackDist = coverVal / cosTheta;
-                    
-                    // 콘크리트 타격점(hit)에서 레이저 반대 방향으로 당김
-                    let tx = hit.x - segNormal.x * pullBackDist;
-                    let ty = hit.y - segNormal.y * pullBackDist;
-
-                    minDist = hit.dist; 
-                    target = { x: tx, y: ty, wall: w }; // FIT을 위해 원래 벽체 정보 저장
-                }
+                minDist = hit.dist; 
+                target = { x: hit.x, y: hit.y, wall: w }; 
             }
         }); 
         return target;
@@ -116,7 +117,6 @@ const Physics = {
         };
 
         const getFarthestWallPoint = (seg, wall, anchorPoint) => {
-            // FIT은 밟고 있는 벽체의 끝점만 당겨서 계산하면 안전합니다.
             let cType = wall.tag ? wall.tag.toLowerCase() : 'outer';
             let coverVal = Domain.currentSection.covers[cType] || 50;
             
@@ -169,26 +169,19 @@ const Physics = {
         }
     },
     
-    // RAY 발사 시에도 당기기(Pull-back) 알고리즘 적용
     rayCastGlobal: (origin, dir, walls) => {
         let bestHit = null; let minDist = Infinity;
         walls.forEach(w => {
-            let p1 = { x: w.x1, y: w.y1 }; let p2 = { x: w.x2, y: w.y2 };
-            let hit = MathUtils.rayLineIntersect(origin, dir, p1, p2);
-            
-            if (hit && hit.dist < minDist && hit.dist > 0.1) { 
-                let cType = w.tag ? w.tag.toLowerCase() : 'outer';
-                let coverVal = Domain.currentSection.covers[cType] || 50;
-                let cosTheta = (-dir.x * w.nx) + (-dir.y * w.ny);
+            let cType = w.tag ? w.tag.toLowerCase() : 'outer';
+            let coverVal = Domain.currentSection.covers[cType] || 50;
 
-                if (cosTheta > 0.05) {
-                    let pullBackDist = coverVal / cosTheta;
-                    minDist = hit.dist; 
-                    bestHit = {
-                        x: hit.x - dir.x * pullBackDist, 
-                        y: hit.y - dir.y * pullBackDist
-                    };
-                }
+            let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal };
+            let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
+
+            let hit = MathUtils.rayLineIntersect(origin, dir, shiftedP1, shiftedP2);
+            if (hit && hit.dist < minDist && hit.dist > 0.1) { 
+                minDist = hit.dist;
+                bestHit = hit;
             }
         });
         return bestHit;
