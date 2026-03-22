@@ -1,4 +1,4 @@
-// v031
+// v032
 class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
@@ -14,7 +14,8 @@ class RebarBase {
         this.debugPoints = []; 
     }
 
-    makeSeg(p1, p2, normal, initialState) {
+    // ✅ 수정 후
+    makeSeg(p1, p2, normal, initialState, label) { // ⭐ label 추가
         let nodes = []; 
         CONFIG.PHYSICS.NODE_POS.forEach(ratio => { 
             nodes.push({ x: p1.x + (p2.x - p1.x) * ratio, y: p1.y + (p2.y - p1.y) * ratio, vx: 0, vy: 0 }); 
@@ -22,14 +23,14 @@ class RebarBase {
         let dx = p2.x - p1.x; let dy = p2.y - p1.y; 
         let initialLen = MathUtils.hypot(dx, dy);
         return { 
-            label: label, // ⭐ 식별 기호(a, b, c...) 객체에 저장
+            label: label, // ✅ 이제 정상적으로 'a', 'b', 'c'... 할당됨
             p1: {...p1}, p2: {...p2}, nodes: nodes, 
             normal: normal, initialLen: initialLen, 
             uDir: { x: dx/initialLen, y: dy/initialLen }, 
             state: initialState 
         }; 
     }
-
+    
     applyRotation() {
         if (this.rotation === 0) return;
         this.segments.forEach(seg => {
