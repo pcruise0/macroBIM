@@ -1,4 +1,4 @@
-// v030
+// v031
 class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
@@ -22,6 +22,7 @@ class RebarBase {
         let dx = p2.x - p1.x; let dy = p2.y - p1.y; 
         let initialLen = MathUtils.hypot(dx, dy);
         return { 
+            label: label, // ⭐ 식별 기호(a, b, c...) 객체에 저장
             p1: {...p1}, p2: {...p2}, nodes: nodes, 
             normal: normal, initialLen: initialLen, 
             uDir: { x: dx/initialLen, y: dy/initialLen }, 
@@ -84,7 +85,12 @@ class RebarBase {
             let ny = nSign === 1 ? ux : -ux;
             
             let state = (i === 0) ? "FITTING" : "WAITING";
-            this.segments.push(this.makeSeg(p1, p2, {x: nx, y: ny}, state));
+            //this.segments.push(this.makeSeg(p1, p2, {x: nx, y: ny}, state));
+            // ⭐ [수정 부분 2] i번째 인덱스에 맞춰 소문자 라벨 생성 ('a', 'b', 'c' ...)
+            let segmentLabel = segKeys[i].toLowerCase(); 
+
+            // ⭐ 생성된 라벨을 makeSeg에 함께 전달
+            this.segments.push(this.makeSeg(p1, p2, {x: nx, y: ny}, state, segmentLabel));
         }
 
         this.applyRotation();
