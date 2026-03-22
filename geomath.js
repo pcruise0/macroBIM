@@ -1,4 +1,4 @@
-/* FUNCTION SUMMARY
+/* FUNCTION SUMMARY  v01
 
    geo_length
    geo_angle
@@ -14,7 +14,7 @@
     const MathUtils = {
         hypot: (dx, dy) => Math.sqrt(dx*dx + dy*dy),
         rayLineIntersect: (rayOrigin, rayDir, lineP1, lineP2) => {
-            let v1 = rayOrigin; let v2 = { x: rayOrigin.x + rayDir.x * 2000, y: rayOrigin.y + rayDir.y * 2000 };
+            let v1 = rayOrigin; let v2 = { x: rayOrigin.x + rayDir.x * 100000, y: rayOrigin.y + rayDir.y * 100000 };
             let v3 = lineP1; let v4 = lineP2;
             let det = (v2.x - v1.x) * (v4.y - v3.y) - (v2.y - v1.y) * (v4.x - v3.x);
             if (det === 0) return null;
