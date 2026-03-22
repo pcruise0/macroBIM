@@ -1,5 +1,5 @@
-// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) ---
-const Physics = {
+// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v018
+ const Physics = {
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
         const OPPOSITE_THRESHOLD = -0.6; // ⭐ 박사님의 원래 안전한 허용치 복구
@@ -76,8 +76,8 @@ const Physics = {
         });
 
         if (allSegmentsSettled && rebar.state !== "FORMED") { 
-            Physics.applyRebarEnds(rebar, walls); 
-            if (rebar.finalize) rebar.finalize();
+            if (rebar.finalize) rebar.finalize(); // ① 먼저 코너 계산 완성
+            Physics.applyRebarEnds(rebar, walls); // ② 그 다음 단부 연장 (최종값 보장)        
             rebar.state = "FORMED"; 
         }
     },
