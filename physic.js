@@ -1,4 +1,4 @@
-// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v019
+// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v020
  const Physics = {
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
@@ -140,8 +140,13 @@
                     let rayOrigin = { x: seg.p1.x + rayDir.x * 10, y: seg.p1.y + rayDir.y * 10 };
                     let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
                     if (hit) {
-                        seg.p1 = { x: hit.x + rayDir.x * rule.val, y: hit.y + rayDir.y * rule.val };
-                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+                        // seg.p1 = { x: hit.x + rayDir.x * rule.val, y: hit.y + rayDir.y * rule.val };
+                        // seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+                        // ✅ rayDir → seg.uDir 로 부호 수정 (E와 동일한 패턴)
+                        seg.p1 = { x: hit.x - seg.uDir.x * rule.val, 
+                                   y: hit.y - seg.uDir.y * rule.val };
+                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, 
+                                                         seg.p2.y - seg.p1.y);                     
                     }
                 }
             }
