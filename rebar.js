@@ -1,4 +1,4 @@
-// v032
+// v033
 class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
@@ -106,12 +106,18 @@ class RebarBase {
         }
         if (this.segments.length > 0) {
             let first = this.segments[0];
-            let angF = Math.atan2(first.nodes[1].y - first.nodes[0].y, first.nodes[1].x - first.nodes[0].x);
+            // let angF = Math.atan2(first.nodes[1].y - first.nodes[0].y, first.nodes[1].x - first.nodes[0].x);
+            // ✅ 수정: uDir 직접 사용 (항상 정확한 방향 보장)
+            let angF = Math.atan2(first.uDir.y, first.uDir.x);            
+            
             first.p1 = { x: first.p2.x - Math.cos(angF) * first.initialLen, y: first.p2.y - Math.sin(angF) * first.initialLen };
         }
         if (this.segments.length > 1) {
             let last = this.segments[this.segments.length - 1];
-            let angL = Math.atan2(last.nodes[1].y - last.nodes[0].y, last.nodes[1].x - last.nodes[0].x);
+            // let angL = Math.atan2(last.nodes[1].y - last.nodes[0].y, last.nodes[1].x - last.nodes[0].x);
+            // ✅ 수정: uDir 직접 사용
+            let angL = Math.atan2(last.uDir.y, last.uDir.x);
+            
             last.p2 = { x: last.p1.x + Math.cos(angL) * last.initialLen, y: last.p1.y + Math.sin(angL) * last.initialLen };
         }
     }
