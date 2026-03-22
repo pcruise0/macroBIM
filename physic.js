@@ -1,4 +1,4 @@
-// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v018
+// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v019
  const Physics = {
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
@@ -167,21 +167,24 @@
         }
     },
     
-    rayCastGlobal: (origin, dir, walls) => {
-        let bestHit = null; let minDist = Infinity;
-        walls.forEach(w => {
-            let cType = w.tag ? w.tag.toLowerCase() : 'outer';
-            let coverVal = Domain.currentSection.covers[cType] || 50;
-
-            let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal };
-            let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
-
-            let hit = MathUtils.rayLineIntersect(origin, dir, shiftedP1, shiftedP2);
-            if (hit && hit.dist < minDist && hit.dist > 0.1) { 
-                minDist = hit.dist;
-                bestHit = hit;
-            }
-        });
-        return bestHit;
-    }
+   rayCastGlobal: (origin, dir, walls) => {
+       let bestHit = null; let minDist = Infinity;
+       walls.forEach(w => {
+           let cType = w.tag ? w.tag.toLowerCase() : 'outer';
+           let coverVal = Domain.currentSection.covers[cType] || 50;
+           let shiftedP1 = { x: w.x1 + w.nx * coverVal, y: w.y1 + w.ny * coverVal };
+           let shiftedP2 = { x: w.x2 + w.nx * coverVal, y: w.y2 + w.ny * coverVal };
+           let hit = MathUtils.rayLineIntersect(origin, dir, shiftedP1, shiftedP2);
+           if (hit && hit.dist < minDist && hit.dist > 0.1) { 
+               // ⭐ [핵심 수정] 전방 방향 확인 — 후방 벽 완전 차단
+               let dotCheck = (hit.x - origin.x) * dir.x + (hit.y - origin.y) * dir.y;
+               if (dotCheck > 0) {
+                   minDist = hit.dist;
+                   bestHit = hit;
+               }
+           }
+       });
+       return bestHit;
+   }
+  
 };
