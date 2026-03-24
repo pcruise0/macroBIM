@@ -1,4 +1,4 @@
-// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v020
+// --- 물리 엔진 (박사님의 오리지널 로직 + 동적 피복 완벽 결합) --- v021
  const Physics = {
     getGravityTarget: (px, py, segNormal, walls) => {
         let minDist = Infinity; let target = null;
@@ -48,31 +48,52 @@
                 allSegmentsSettled = false; 
                 if (idx === 0 || rebar.segments[idx-1].state === "SETTLED") seg.state = "FITTING"; 
             }
-            if (seg.state === "FITTING") {
-                allSegmentsSettled = false; 
-                let segEnergy = 0; let maxPosError = 0; let validTargets = 0;
+if (seg.state === "FITTING") {
+    allSegmentsSettled = false;
 
-                seg.nodes.forEach(node => {
-                    let target = Physics.getGravityTarget(node.x, node.y, seg.normal, walls);
-                    if (target) {
-                        validTargets++; 
-                        rebar.debugPoints.push(target); 
-                        seg.contactWall = target.wall; 
-                        let dx = target.x - node.x; let dy = target.y - node.y;
-                        let err = MathUtils.hypot(dx, dy); 
-                        if (err > maxPosError) maxPosError = err; 
-                        node.vx += dx * GRAVITY_K; node.vy += dy * GRAVITY_K;
-                    }
-                    node.vx *= DAMPING; node.vy *= DAMPING; 
-                    node.x += node.vx; node.y += node.vy; 
-                    segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
-                });
+    let segEnergy = 0;
+    let maxPosError = 0;
+    let validTargets = 0;
+    let hitInfos = [];   // ✅ 노드별 wall hit 정보 수집
 
-                if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) { 
-                    seg.state = "SETTLED"; 
-                    Physics.restoreSegmentLine(seg); 
-                }
-            }
+    seg.nodes.forEach(node => {
+        let target = Physics.getGravityTarget(node.x, node.y, seg.normal, walls);
+
+        if (target) {
+            let dx = target.x - node.x;
+            let dy = target.y - node.y;
+            let err = MathUtils.hypot(dx, dy);
+
+            validTargets++;
+            rebar.debugPoints.push(target);
+
+            seg.contactWall = target.wall; // 기존 호환 유지
+            hitInfos.push({ wall: target.wall, dist: err });
+
+            if (err > maxPosError) maxPosError = err;
+
+            node.vx += dx * GRAVITY_K;
+            node.vy += dy * GRAVITY_K;
+        }
+
+        node.vx *= DAMPING;
+        node.vy *= DAMPING;
+        node.x += node.vx;
+        node.y += node.vy;
+
+        segEnergy += Math.abs(node.vx) + Math.abs(node.vy);
+    });
+
+    if (validTargets === seg.nodes.length && segEnergy < CONVERGE && maxPosError < 1.0) {
+        seg.state = "SETTLED";
+
+        // ✅ settling 시점에 대표벽 확정
+        seg.fitWall = Physics.resolveSegmentFitWall(seg, hitInfos);
+
+        Physics.restoreSegmentLine(seg);
+    }
+}
+
         });
 
         if (allSegmentsSettled && rebar.state !== "FORMED") { 
@@ -82,6 +103,50 @@
         }
     },
 
+resolveSegmentFitWall: (seg, hitInfos = []) => {
+    // set으로 배치된 세그먼트는 anchorWall 우선
+    if (seg.anchorWall) return seg.anchorWall;
+
+    // fitting 중 수집한 wall 후보를 다수결 + 거리합 최소 기준으로 선택
+    const wallMap = new Map();
+
+    hitInfos.forEach(info => {
+        if (!info.wall) return;
+
+        const wallId = info.wall.id || `${info.wall.x1},${info.wall.y1},${info.wall.x2},${info.wall.y2}`;
+
+        if (!wallMap.has(wallId)) {
+            wallMap.set(wallId, {
+                wall: info.wall,
+                count: 0,
+                totalDist: 0
+            });
+        }
+
+        const acc = wallMap.get(wallId);
+        acc.count += 1;
+        acc.totalDist += info.dist || 0;
+    });
+
+    let best = null;
+    wallMap.forEach(item => {
+        if (
+            !best ||
+            item.count > best.count ||
+            (item.count === best.count && item.totalDist < best.totalDist)
+        ) {
+            best = item;
+        }
+    });
+
+    return best ? best.wall : (seg.contactWall || null);
+},
+
+getSegmentFitWall: (seg) => {
+    return seg.fitWall || seg.anchorWall || seg.contactWall || null;
+},
+
+  
     restoreSegmentLine: (seg) => {
         let n1 = seg.nodes[0]; let n2 = seg.nodes[1]; 
         let cx = (n1.x + n2.x) / 2; let cy = (n1.y + n2.y) / 2;
@@ -104,73 +169,121 @@
         return { x: lineOrigin.x + dot * lineDir.x, y: lineOrigin.y + dot * lineDir.y };
     },
 
-    applyRebarEnds: (rebar, walls) => {
-        if (!rebar.ends) return;
-        const parseEndRule = (ruleObj) => {
-            if (!ruleObj) return null;
-            if (ruleObj.type !== undefined) return { type: ruleObj.type.toUpperCase(), val: ruleObj.val };
-            let keys = Object.keys(ruleObj);
-            if (keys.length > 0) return { type: keys[0].toUpperCase(), val: ruleObj[keys[0]] };
-            return null;
+applyRebarEnds: (rebar, walls) => {
+    const barEnds = rebar.barEnds || rebar.ends; // 하위 호환
+    if (!barEnds) return;
+
+    const parseEndRule = (ruleObj) => {
+        if (!ruleObj) return null;
+        if (ruleObj.type !== undefined) {
+            return { type: ruleObj.type.toUpperCase(), val: Number(ruleObj.val) };
+        }
+        let keys = Object.keys(ruleObj);
+        if (keys.length > 0) {
+            return { type: keys[0].toUpperCase(), val: Number(ruleObj[keys[0]]) };
+        }
+        return null;
+    };
+
+    const getShiftedWallEnds = (wall) => {
+        let cType = wall.tag ? wall.tag.toLowerCase() : 'outer';
+        let coverVal = Domain.currentSection.covers[cType] || 50;
+
+        return {
+            wp1: { x: wall.x1 + wall.nx * coverVal, y: wall.y1 + wall.ny * coverVal },
+            wp2: { x: wall.x2 + wall.nx * coverVal, y: wall.y2 + wall.ny * coverVal }
         };
+    };
 
-        const getFarthestWallPoint = (seg, wall, anchorPoint) => {
-            let cType = wall.tag ? wall.tag.toLowerCase() : 'outer';
-            let coverVal = Domain.currentSection.covers[cType] || 50;
-            
-            let wp1 = { x: wall.x1 + wall.nx * coverVal, y: wall.y1 + wall.ny * coverVal };
-            let wp2 = { x: wall.x2 + wall.nx * coverVal, y: wall.y2 + wall.ny * coverVal };
+    const getFarthestWallPoint = (seg, wall, anchorPoint) => {
+        const { wp1, wp2 } = getShiftedWallEnds(wall);
 
-            let d1 = (wp1.x - anchorPoint.x) ** 2 + (wp1.y - anchorPoint.y) ** 2;
-            let d2 = (wp2.x - anchorPoint.x) ** 2 + (wp2.y - anchorPoint.y) ** 2;
-            let targetP = (d1 > d2) ? wp1 : wp2;
-            return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
-        };
+        let d1 = (wp1.x - anchorPoint.x) ** 2 + (wp1.y - anchorPoint.y) ** 2;
+        let d2 = (wp2.x - anchorPoint.x) ** 2 + (wp2.y - anchorPoint.y) ** 2;
 
-        if (rebar.ends.B) {
-            let rule = parseEndRule(rebar.ends.B);
-            if (rule) {
-                let seg = rebar.segments[0];
-                if (rule.type === "FIT" && seg.contactWall) {
-                    let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p2);
-                    seg.p1 = { x: projected.x + seg.uDir.x * rule.val, y: projected.y + seg.uDir.y * rule.val };
-                    seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-                } else if (rule.type === "RAY") { 
-                    let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y };
-                    let rayOrigin = { x: seg.p1.x + rayDir.x * 10, y: seg.p1.y + rayDir.y * 10 };
-                    let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
-                    if (hit) {
-                        // seg.p1 = { x: hit.x + rayDir.x * rule.val, y: hit.y + rayDir.y * rule.val };
-                        // seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-                        // ✅ rayDir → seg.uDir 로 부호 수정 (E와 동일한 패턴)
-                        seg.p1 = { x: hit.x - seg.uDir.x * rule.val, 
-                                   y: hit.y - seg.uDir.y * rule.val };
-                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, 
-                                                         seg.p2.y - seg.p1.y);                     
-                    }
-                }
+        let targetP = (d1 > d2) ? wp1 : wp2;
+        return Physics.projectPointToLine(targetP, seg.p1, seg.uDir);
+    };
+
+    const startRule = parseEndRule(barEnds.start || barEnds.B);
+    const endRule   = parseEndRule(barEnds.end   || barEnds.E);
+
+    // start = 첫 세그먼트 시작단
+    if (startRule) {
+        let seg = rebar.segments[0];
+
+        if (startRule.type === "FIT") {
+            let wall = Physics.getSegmentFitWall(seg);
+            if (!wall) {
+                console.error(`[FIT ERROR] ${rebar.id || 'UNKNOWN'} start.fit 에 사용할 대표벽이 없습니다.`);
+            } else {
+                let projected = getFarthestWallPoint(seg, wall, seg.p2);
+
+                seg.p1 = {
+                    x: projected.x + seg.uDir.x * startRule.val,
+                    y: projected.y + seg.uDir.y * startRule.val
+                };
+
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+            }
+        } else if (startRule.type === "RAY") {
+            let rayDir = { x: -seg.uDir.x, y: -seg.uDir.y };
+            let rayOrigin = {
+                x: seg.p1.x + rayDir.x * 10,
+                y: seg.p1.y + rayDir.y * 10
+            };
+
+            let hit = Physics.rayCastGlobal(rayOrigin, rayDir, walls);
+
+            if (hit) {
+                seg.p1 = {
+                    x: hit.x - seg.uDir.x * startRule.val,
+                    y: hit.y - seg.uDir.y * startRule.val
+                };
+
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
             }
         }
+    }
 
-        if (rebar.ends.E) {
-            let rule = parseEndRule(rebar.ends.E);
-            if (rule) {
-                let seg = rebar.segments[rebar.segments.length - 1];
-                if (rule.type === "FIT" && seg.contactWall) {
-                    let projected = getFarthestWallPoint(seg, seg.contactWall, seg.p1);
-                    seg.p2 = { x: projected.x + seg.uDir.x * rule.val, y: projected.y + seg.uDir.y * rule.val };
-                    seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-                } else if (rule.type === "RAY") {
-                    let rayOrigin = { x: seg.p2.x + seg.uDir.x * 10, y: seg.p2.y + seg.uDir.y * 10 };
-                    let hit = Physics.rayCastGlobal(rayOrigin, seg.uDir, walls);
-                    if (hit) {
-                        seg.p2 = { x: hit.x + seg.uDir.x * rule.val, y: hit.y + seg.uDir.y * rule.val };
-                        seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
-                    }
-                }
+    // end = 마지막 세그먼트 끝단
+    if (endRule) {
+        let seg = rebar.segments[rebar.segments.length - 1];
+
+        if (endRule.type === "FIT") {
+            let wall = Physics.getSegmentFitWall(seg);
+            if (!wall) {
+                console.error(`[FIT ERROR] ${rebar.id || 'UNKNOWN'} end.fit 에 사용할 대표벽이 없습니다.`);
+            } else {
+                let projected = getFarthestWallPoint(seg, wall, seg.p1);
+
+                seg.p2 = {
+                    x: projected.x + seg.uDir.x * endRule.val,
+                    y: projected.y + seg.uDir.y * endRule.val
+                };
+
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+            }
+        } else if (endRule.type === "RAY") {
+            let rayOrigin = {
+                x: seg.p2.x + seg.uDir.x * 10,
+                y: seg.p2.y + seg.uDir.y * 10
+            };
+
+            let hit = Physics.rayCastGlobal(rayOrigin, seg.uDir, walls);
+
+            if (hit) {
+                seg.p2 = {
+                    x: hit.x + seg.uDir.x * endRule.val,
+                    y: hit.y + seg.uDir.y * endRule.val
+                };
+
+                seg.initialLen = MathUtils.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
             }
         }
-    },
+    }
+},
+
     
    rayCastGlobal: (origin, dir, walls) => {
        let bestHit = null; let minDist = Infinity;
