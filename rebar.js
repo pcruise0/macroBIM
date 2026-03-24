@@ -1,4 +1,4 @@
-// v033
+// v034
 class RebarBase {
     // ⭐ [수정 1] 생성자 파라미터: ang->angs, nor->nors, ends 추가
     constructor(center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
@@ -8,7 +8,7 @@ class RebarBase {
         this.rotation = rotation;
         this.angs = angs; // 복수형 s 적용
         this.nors = nors; // 복수형 s 적용
-        this.ends = ends; // 단부 처리 규칙 (B/E) 추가
+        this.barEnds = barEnds;   // this.ends = ends; // 단부 처리 규칙 (B/E) 추가
         this.segments = []; 
         this.state = "ASSEMBLING"; 
         this.debugPoints = []; 
@@ -28,6 +28,11 @@ class RebarBase {
             normal: normal, initialLen: initialLen, 
             uDir: { x: dx/initialLen, y: dy/initialLen }, 
             state: initialState 
+
+            // ✅ 신규: 세그먼트가 의지하는 대표 벽 관리
+            anchorWall: null,   // set으로 직접 배치된 벽
+            fitWall: null,      // fitting 후 최종 대표 벽
+            contactWall: null   // 기존 호환용            
         }; 
     }
     
@@ -169,44 +174,41 @@ class RebarFactory {
         return normalized;
     }
 
-    // ⭐ 헬퍼: Ends 내부의 { "FIT": 0 } 형태를 { type: "FIT", val: 0 }으로 표준화
-    static parseEnds(endsData) {
-        if (!endsData) return null;
+    // ✅ 신규: start/end 기반 단부 규칙 파서
+    static parseBarEnds(barEndsData) {
+        if (!barEndsData) return null;
+
         const parsed = {};
-        
-        // b, B, e, E 모두 허용하기 위해 키 반복 확인
-        Object.keys(endsData).forEach(key => {
-            const k = key.toLowerCase(); // b 또는 e
-            const ruleObj = endsData[key]; // { "fit": 0 } 형태
-            
-            if (ruleObj) {
-                // { "fit": 0 } 에서 키("fit")와 값(0)을 추출
-                const command = Object.keys(ruleObj)[0]; // "fit"
-                const val = ruleObj[command];            // 0
-                
-                // 내부적으로는 물리 엔진이 이해하기 쉽게 표준 포맷으로 변환하여 저장
-                // B 또는 E 키에 할당
-                parsed[k === 'b' ? 'B' : 'E'] = { 
-                    type: command.toUpperCase(), // "FIT" (대문자 강제)
-                    val: Number(val) 
-                };
+
+        Object.keys(barEndsData).forEach(key => {
+            const k = key.toLowerCase();
+            const ruleObj = barEndsData[key];
+            if (!ruleObj) return;
+
+            const command = Object.keys(ruleObj)[0];
+            if (!command) return;
+
+            const val = Number(ruleObj[command]);
+
+            if (k === "start" || k === "b") {
+                parsed.start = { type: command.toUpperCase(), val: val };
+            } else if (k === "end" || k === "e") {
+                parsed.end = { type: command.toUpperCase(), val: val };
             }
         });
-        return parsed;
+
+        return Object.keys(parsed).length > 0 ? parsed : null;
     }
 
-    static create(code, center, dims, rotation = 0, angs = null, nors = null, ends = null) { 
-        // ⚠️ 주의: 여기서 직접 호출할 땐 이미 index.html에서 정제된 값이 올 수도 있고 아닐 수도 있음.
-        // 하지만 안전하게 생성자에게 넘기기 전에는 그대로 둠.
-        // 실제로는 index.html에서 normalize해서 넘기는 게 좋지만, 
-        // 편의상 Factory.create를 호출하는 index.html 쪽 코드를 수정하는 게 낫습니다.
-        
-        // (기존 코드 유지)
+    static create(code, center, dims, rotation = 0, angs = null, nors = null, barEnds = null) {
         let r = null;
-        if(code === 1) r = new Shape01(center, dims, rotation, angs, nors, ends);
-        else if(code === 11) r = new Shape11(center, dims, rotation, angs, nors, ends);
-        else if(code === 21) r = new Shape21(center, dims, rotation, angs, nors, ends);
-        else if(code === 41 || code === 44) r = new Shape41(center, dims, rotation, angs, nors, ends);
+
+        if (code === 1) r = new Shape01(center, dims, rotation, angs, nors, barEnds);
+        else if (code === 11) r = new Shape11(center, dims, rotation, angs, nors, barEnds);
+        else if (code === 21) r = new Shape21(center, dims, rotation, angs, nors, barEnds);
+        else if (code === 41 || code === 44) r = new Shape41(center, dims, rotation, angs, nors, barEnds);
+
         return r ? r.generate() : null;
-    } 
+    }
+    
 }
